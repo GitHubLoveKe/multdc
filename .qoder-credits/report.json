@@ -1,0 +1,2212 @@
+{
+  "schemaVersion": 3.2,
+  "generatedAt": "2026-09-21T07:55:25.516Z",
+  "source": "desktop-rich",
+  "usageSource": "transcript-ratio",
+  "availability": {
+    "credits": "measured",
+    "roundTrips": "measured",
+    "contextRatio": "measured",
+    "tokens": "derived",
+    "outputTokens": "unavailable",
+    "cachedTokens": "unavailable",
+    "categoryShare": "derived",
+    "toolShare": "derived",
+    "fileShare": "derived",
+    "systemPrompt": "derived",
+    "contextWindow": "measured",
+    "compactions": "measured",
+    "compactionCost": "measured",
+    "model": "measured",
+    "title": "measured",
+    "toolCalls": "measured",
+    "fileReads": "measured",
+    "userTurns": "measured",
+    "userContextLimit": "fallback"
+  },
+  "session": {
+    "id": "c4c64b31-83f6-409f-89bf-cd9bcc89f6e0",
+    "title": "使用产品设计的相关技能，梳理当前项目，构建项目架",
+    "titleSource": "first-user",
+    "model": "auto",
+    "modelSource": "runtime-config",
+    "cwd": "D:\\UGit\\multdc",
+    "turns": 10,
+    "roundTrips": 109,
+    "compactions": 4,
+    "startedAt": "2026-09-21T03:47:23.898Z",
+    "endedAt": "2026-09-21T07:55:24.764Z"
+  },
+  "context": {
+    "contextWindow": 128000,
+    "contextWindowSource": "runtime-config",
+    "systemPromptTokens": 19256,
+    "netContextTokens": 92356,
+    "peakContextTokens": 92356,
+    "peakContextRatio": 0.72153125,
+    "peakSessionTokens": 92356,
+    "peakSessionRatio": 0.72153125,
+    "peakSessionNotable": false,
+    "peakAdvice": {
+      "level": "sweet",
+      "tone": "success",
+      "text": "正处性价比区间（65–85%）。此时压一次每轮省得最多，且第一轮就回本"
+    },
+    "userContextLimit": 200000,
+    "userContextLimitSource": "default",
+    "peakUserRatio": 0.46178,
+    "peakUserAdvice": {
+      "level": "mid",
+      "tone": "info",
+      "text": "已过盈亏线（39%）但还没进性价比区间，压缩有净收益但不大；不急着压"
+    },
+    "currentContextTokens": 92356,
+    "netUserRatio": 0.46178,
+    "netUserAdvice": {
+      "level": "mid",
+      "tone": "info",
+      "text": "已过盈亏线（39%）但还没进性价比区间，压缩有净收益但不大；不急着压"
+    },
+    "netWindowRatio": 0.72153125,
+    "observedAutoCompactions": 4,
+    "observedAutoTriggerTokens": 109877,
+    "autoTriggerRatio": 0.8584140625,
+    "thresholdNotEnforced": false
+  },
+  "totals": {
+    "billedInputTokens": 7713723,
+    "netContextTokens": 92356,
+    "peakContextTokens": 92356,
+    "amplification": 83.52,
+    "attributedTokens": 7713723,
+    "coverage": 1,
+    "credits": 71.405,
+    "originalCredits": 71.405,
+    "outputTokens": 0,
+    "cachedTokens": 0,
+    "cachedTrips": 0,
+    "cachedShare": 0,
+    "toolCalls": 123,
+    "fileReads": 67
+  },
+  "creditsCoverage": {
+    "trips": 109,
+    "roundTrips": 109,
+    "tokens": 7713723,
+    "tokenShare": 1,
+    "full": true
+  },
+  "compactionCost": {
+    "count": 4,
+    "items": [
+      {
+        "index": 1,
+        "at": "2026-09-21T03:48:24.689Z",
+        "trigger": "auto",
+        "preTokens": 109877,
+        "postTokens": 1986,
+        "messagesSummarized": 38,
+        "nextRequestIndex": 6,
+        "nextInputTokens": 73482,
+        "savedTokens": 36395,
+        "proxy": null,
+        "effectiveInputTokens": 109877,
+        "effectiveOutputTokens": 1986
+      },
+      {
+        "index": 2,
+        "at": "2026-09-21T04:01:03.553Z",
+        "trigger": "auto",
+        "preTokens": 97249,
+        "postTokens": 2509,
+        "messagesSummarized": 35,
+        "nextRequestIndex": 15,
+        "nextInputTokens": 47974,
+        "savedTokens": 49275,
+        "proxy": null,
+        "effectiveInputTokens": 97249,
+        "effectiveOutputTokens": 2509
+      },
+      {
+        "index": 3,
+        "at": "2026-09-21T06:23:51.155Z",
+        "trigger": "auto",
+        "preTokens": 113074,
+        "postTokens": 3136,
+        "messagesSummarized": 114,
+        "nextRequestIndex": 41,
+        "nextInputTokens": 48629,
+        "savedTokens": 64445,
+        "proxy": null,
+        "effectiveInputTokens": 113074,
+        "effectiveOutputTokens": 3136
+      },
+      {
+        "index": 4,
+        "at": "2026-09-21T07:34:04.264Z",
+        "trigger": "auto",
+        "preTokens": 105972,
+        "postTokens": 3238,
+        "messagesSummarized": 119,
+        "nextRequestIndex": 76,
+        "nextInputTokens": 48693,
+        "savedTokens": 57279,
+        "proxy": null,
+        "effectiveInputTokens": 105972,
+        "effectiveOutputTokens": 3238
+      }
+    ],
+    "totals": {
+      "preTokens": 426172,
+      "postTokens": 10869,
+      "savedTokens": 207394,
+      "measured": 0
+    }
+  },
+  "proxy": {
+    "matched": 0,
+    "requests": 109,
+    "breakdown": {
+      "proxy": 0,
+      "transcriptTokens": 0,
+      "transcriptRatio": 109
+    },
+    "logPath": "C:\\Users\\29670\\.qoder-credits-proxy\\usage.jsonl",
+    "logExists": false,
+    "logRecords": 0,
+    "configured": false,
+    "enabled": true,
+    "port": 49787,
+    "lastRecordAt": null,
+    "dormant": false,
+    "status": null,
+    "statusSuperseded": false
+  },
+  "byCategory": [
+    {
+      "key": "tool_result",
+      "label": "工具返回",
+      "tokens": 700512,
+      "share": 0.09081367226211692
+    },
+    {
+      "key": "system",
+      "label": "系统提示词",
+      "tokens": 2098904,
+      "share": 0.27209999633121384
+    },
+    {
+      "key": "compact_summary",
+      "label": "压缩摘要",
+      "tokens": 265129,
+      "share": 0.03437110259103814
+    },
+    {
+      "key": "assistant_thinking",
+      "label": "模型思考",
+      "tokens": 166147,
+      "share": 0.021539166918503078
+    },
+    {
+      "key": "assistant_tool_use",
+      "label": "工具调用",
+      "tokens": 1108587,
+      "share": 0.143716208447978
+    },
+    {
+      "key": "assistant_text",
+      "label": "模型回复",
+      "tokens": 15210,
+      "share": 0.0019718450562796717
+    },
+    {
+      "key": "user_input",
+      "label": "用户输入",
+      "tokens": 302954,
+      "share": 0.03927468149656381
+    },
+    {
+      "key": "attachment",
+      "label": "附件/技能",
+      "tokens": 3056280,
+      "share": 0.3962133268963074
+    }
+  ],
+  "byCategoryDetail": [
+    {
+      "key": "tool_result",
+      "label": "工具返回",
+      "tokens": 700512,
+      "share": 0.09081367226211692,
+      "children": [
+        {
+          "tool": "Read",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "read",
+          "tokens": 633553,
+          "share": 0.08213326319519557,
+          "catShare": 0.9044151739413537,
+          "trips": 62
+        },
+        {
+          "tool": "Edit",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "write",
+          "tokens": 31978,
+          "share": 0.00414562872233976,
+          "catShare": 0.04564983024113558,
+          "trips": 767
+        },
+        {
+          "tool": "Bash",
+          "label": "（无路径）",
+          "kind": "shell",
+          "tokens": 14197,
+          "share": 0.0018405146179846957,
+          "catShare": 0.02026693307448673,
+          "trips": 244
+        },
+        {
+          "tool": "Agent",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 11548,
+          "share": 0.0014970654258785897,
+          "catShare": 0.016485022448575654,
+          "trips": 78
+        },
+        {
+          "tool": "TaskCreate",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 4078,
+          "share": 0.0005286896279380794,
+          "catShare": 0.005821696389637391,
+          "trips": 202
+        },
+        {
+          "tool": "TaskUpdate",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 1259,
+          "share": 0.0001631824976348621,
+          "catShare": 0.001796893502598,
+          "trips": 243
+        },
+        {
+          "tool": "TaskList",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 1038,
+          "share": 0.00013460751854162164,
+          "catShare": 0.0014822384690391316,
+          "trips": 24
+        },
+        {
+          "tool": "Glob",
+          "label": "design",
+          "kind": "search",
+          "tokens": 633,
+          "share": 0.00008202704522180158,
+          "catShare": 0.0009032455485892658,
+          "trips": 21
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/zone-manifest-protocol.md",
+          "kind": "write",
+          "tokens": 473,
+          "share": 0.00006135656963949988,
+          "catShare": 0.0006756314122217793,
+          "trips": 25
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/degradation-autonomy.md",
+          "kind": "write",
+          "tokens": 454,
+          "share": 0.000058896688632687345,
+          "catShare": 0.0006485442903651436,
+          "trips": 24
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/decisions-log.md",
+          "kind": "write",
+          "tokens": 396,
+          "share": 0.00005131690680622243,
+          "catShare": 0.0005650790847671664,
+          "trips": 23
+        },
+        {
+          "tool": "Write",
+          "label": "design/README.md",
+          "kind": "write",
+          "tokens": 374,
+          "share": 0.0000484694819163521,
+          "catShare": 0.0005337245010470877,
+          "trips": 29
+        },
+        {
+          "tool": "Glob",
+          "label": "D:/UGit/multdc",
+          "kind": "search",
+          "tokens": 343,
+          "share": 0.00004443923085338705,
+          "catShare": 0.0004893451585695313,
+          "trips": 6
+        },
+        {
+          "tool": "Write",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "write",
+          "tokens": 111,
+          "share": 0.000014379703079788957,
+          "catShare": 0.00015834293142870157,
+          "trips": 5
+        },
+        {
+          "tool": "Skill",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 76,
+          "share": 0.000009835030453320197,
+          "catShare": 0.00010829900617754115,
+          "trips": 8
+        }
+      ]
+    },
+    {
+      "key": "system",
+      "label": "系统提示词",
+      "tokens": 2098904,
+      "share": 0.27209999633121384,
+      "children": []
+    },
+    {
+      "key": "compact_summary",
+      "label": "压缩摘要",
+      "tokens": 265129,
+      "share": 0.03437110259103814,
+      "children": []
+    },
+    {
+      "key": "assistant_thinking",
+      "label": "模型思考",
+      "tokens": 166147,
+      "share": 0.021539166918503078,
+      "children": []
+    },
+    {
+      "key": "assistant_tool_use",
+      "label": "工具调用",
+      "tokens": 1108587,
+      "share": 0.143716208447978,
+      "children": [
+        {
+          "tool": "Edit",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "write",
+          "tokens": 406529,
+          "share": 0.05270208913437818,
+          "catShare": 0.36670943175804105,
+          "trips": 767
+        },
+        {
+          "tool": "Agent",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 252444,
+          "share": 0.032726546519206375,
+          "catShare": 0.22771646199567422,
+          "trips": 78
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/degradation-autonomy.md",
+          "kind": "write",
+          "tokens": 104038,
+          "share": 0.013487341696885403,
+          "catShare": 0.09384704649905591,
+          "trips": 24
+        },
+        {
+          "tool": "Write",
+          "label": "design/README.md",
+          "kind": "write",
+          "tokens": 98729,
+          "share": 0.012799174524711378,
+          "catShare": 0.0890586709942629,
+          "trips": 29
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/zone-manifest-protocol.md",
+          "kind": "write",
+          "tokens": 92140,
+          "share": 0.011945008534817178,
+          "catShare": 0.08311524958676461,
+          "trips": 25
+        },
+        {
+          "tool": "Write",
+          "label": "design/cross-plane/decisions-log.md",
+          "kind": "write",
+          "tokens": 88887,
+          "share": 0.01152321142333725,
+          "catShare": 0.08018031889220338,
+          "trips": 23
+        },
+        {
+          "tool": "Write",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "write",
+          "tokens": 37816,
+          "share": 0.004902372619201897,
+          "catShare": 0.03411148034131755,
+          "trips": 5
+        },
+        {
+          "tool": "TaskCreate",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 13372,
+          "share": 0.0017335862622020874,
+          "catShare": 0.012062566087175939,
+          "trips": 202
+        },
+        {
+          "tool": "Bash",
+          "label": "（无路径）",
+          "kind": "shell",
+          "tokens": 11018,
+          "share": 0.001428309812077218,
+          "catShare": 0.009938404495232936,
+          "trips": 244
+        },
+        {
+          "tool": "TaskUpdate",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 1888,
+          "share": 0.0002447737464522932,
+          "catShare": 0.0017031742563741218,
+          "trips": 243
+        },
+        {
+          "tool": "Read",
+          "label": "项目架构雏形与冲突分析.md",
+          "kind": "read",
+          "tokens": 1326,
+          "share": 0.0001718599922044195,
+          "catShare": 0.0011958288773435664,
+          "trips": 62
+        },
+        {
+          "tool": "Glob",
+          "label": "design",
+          "kind": "search",
+          "tokens": 253,
+          "share": 0.00003281081808872064,
+          "catShare": 0.00022830283684110279,
+          "trips": 21
+        },
+        {
+          "tool": "Skill",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 64,
+          "share": 0.000008359775885322168,
+          "catShare": 0.00005816863647880202,
+          "trips": 8
+        },
+        {
+          "tool": "Glob",
+          "label": "D:/UGit/multdc",
+          "kind": "search",
+          "tokens": 61,
+          "share": 0.00000795926522747231,
+          "catShare": 0.000055381820279188504,
+          "trips": 6
+        },
+        {
+          "tool": "TaskList",
+          "label": "（无路径）",
+          "kind": "other",
+          "tokens": 22,
+          "share": 0.0000028043233029504506,
+          "catShare": 0.000019512922955837315,
+          "trips": 24
+        }
+      ]
+    },
+    {
+      "key": "assistant_text",
+      "label": "模型回复",
+      "tokens": 15210,
+      "share": 0.0019718450562796717,
+      "children": []
+    },
+    {
+      "key": "user_input",
+      "label": "用户输入",
+      "tokens": 302954,
+      "share": 0.03927468149656381,
+      "children": []
+    },
+    {
+      "key": "attachment",
+      "label": "附件/技能",
+      "tokens": 3056280,
+      "share": 0.3962133268963074,
+      "children": []
+    }
+  ],
+  "byTool": [
+    {
+      "tool": "Read",
+      "tokens": 634879,
+      "calls": 9,
+      "perCall": 70542,
+      "share": 0.0823051231874
+    },
+    {
+      "tool": "Edit",
+      "tokens": 438508,
+      "calls": 51,
+      "perCall": 8598,
+      "share": 0.05684771785671768
+    },
+    {
+      "tool": "Write",
+      "tokens": 423418,
+      "calls": 5,
+      "perCall": 84684,
+      "share": 0.054891528149027674
+    },
+    {
+      "tool": "Agent",
+      "tokens": 263991,
+      "calls": 3,
+      "perCall": 87997,
+      "share": 0.03422361194508497
+    },
+    {
+      "tool": "Bash",
+      "tokens": 25215,
+      "calls": 23,
+      "perCall": 1096,
+      "share": 0.003268824430061917
+    },
+    {
+      "tool": "TaskCreate",
+      "tokens": 17451,
+      "calls": 9,
+      "perCall": 1939,
+      "share": 0.0022622758901401667
+    },
+    {
+      "tool": "TaskUpdate",
+      "tokens": 3147,
+      "calls": 18,
+      "perCall": 175,
+      "share": 0.0004079562440871539
+    },
+    {
+      "tool": "Glob",
+      "tokens": 1290,
+      "calls": 2,
+      "perCall": 645,
+      "share": 0.00016723635939138161
+    },
+    {
+      "tool": "TaskList",
+      "tokens": 1060,
+      "calls": 1,
+      "perCall": 1060,
+      "share": 0.00013741184184457207
+    },
+    {
+      "tool": "Skill",
+      "tokens": 140,
+      "calls": 2,
+      "perCall": 70,
+      "share": 0.000018194806338642367
+    }
+  ],
+  "byFile": [
+    {
+      "attr": "file:D:\\UGit\\multdc\\项目架构雏形与冲突分析.md",
+      "label": "项目架构雏形与冲突分析.md",
+      "kind": "write",
+      "tool": "Write",
+      "selfTokens": 85748,
+      "reads": 56,
+      "trips": 1668,
+      "billed": 1111313,
+      "perRead": 19845,
+      "share": 0.1440695933663996
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc\\design\\cross-plane\\degradation-autonomy.md",
+      "label": "design/cross-plane/degradation-autonomy.md",
+      "kind": "write",
+      "tool": "Write",
+      "selfTokens": 5060,
+      "reads": 1,
+      "trips": 48,
+      "billed": 104492,
+      "perRead": 104492,
+      "share": 0.013546238385518088
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc\\design\\README.md",
+      "label": "design/README.md",
+      "kind": "write",
+      "tool": "Write",
+      "selfTokens": 3976,
+      "reads": 1,
+      "trips": 58,
+      "billed": 99103,
+      "perRead": 99103,
+      "share": 0.01284764400662773
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc\\design\\cross-plane\\zone-manifest-protocol.md",
+      "label": "design/cross-plane/zone-manifest-protocol.md",
+      "kind": "write",
+      "tool": "Write",
+      "selfTokens": 4305,
+      "reads": 1,
+      "trips": 50,
+      "billed": 92614,
+      "perRead": 92614,
+      "share": 0.01200636510445668
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc\\design\\cross-plane\\decisions-log.md",
+      "label": "design/cross-plane/decisions-log.md",
+      "kind": "write",
+      "tool": "Write",
+      "selfTokens": 4511,
+      "reads": 1,
+      "trips": 46,
+      "billed": 89283,
+      "perRead": 89283,
+      "share": 0.011574528330143469
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc\\design",
+      "label": "design",
+      "kind": "search",
+      "tool": "Glob",
+      "selfTokens": 49,
+      "reads": 1,
+      "trips": 42,
+      "billed": 886,
+      "perRead": 886,
+      "share": 0.00011483786331052218
+    },
+    {
+      "attr": "file:D:\\UGit\\multdc",
+      "label": "D:/UGit/multdc",
+      "kind": "search",
+      "tool": "Glob",
+      "selfTokens": 79,
+      "reads": 1,
+      "trips": 12,
+      "billed": 404,
+      "perRead": 404,
+      "share": 0.00005239849608085937
+    },
+    {
+      "attr": "file:D:/UGit/multdc/需求梳理v3-存储与采集架构.md",
+      "label": "需求梳理v3-存储与采集架构.md",
+      "kind": "read",
+      "tool": "Read",
+      "selfTokens": 11334,
+      "reads": 1,
+      "trips": 0,
+      "billed": 0,
+      "perRead": 0,
+      "share": 0
+    },
+    {
+      "attr": "file:D:/UGit/multdc/多网区Prometheus采集与调度架构设计.md",
+      "label": "多网区Prometheus采集与调度架构设计.md",
+      "kind": "read",
+      "tool": "Read",
+      "selfTokens": 32240,
+      "reads": 1,
+      "trips": 0,
+      "billed": 0,
+      "perRead": 0,
+      "share": 0
+    },
+    {
+      "attr": "file:D:/UGit/multdc/分区规模接入方案.md",
+      "label": "分区规模接入方案.md",
+      "kind": "read",
+      "tool": "Read",
+      "selfTokens": 5162,
+      "reads": 1,
+      "trips": 0,
+      "billed": 0,
+      "perRead": 0,
+      "share": 0
+    },
+    {
+      "attr": "file:D:/UGit/multdc/需求整理与Plan-v2.md",
+      "label": "需求整理与Plan-v2.md",
+      "kind": "read",
+      "tool": "Read",
+      "selfTokens": 5536,
+      "reads": 1,
+      "trips": 0,
+      "billed": 0,
+      "perRead": 0,
+      "share": 0
+    },
+    {
+      "attr": "file:D:/UGit/multdc/需求审视与实施Plan.md",
+      "label": "需求审视与实施Plan.md",
+      "kind": "read",
+      "tool": "Read",
+      "selfTokens": 6651,
+      "reads": 1,
+      "trips": 0,
+      "billed": 0,
+      "perRead": 0,
+      "share": 0
+    }
+  ],
+  "byAttr": [
+    {
+      "attr": "attachment",
+      "tokens": 3056280,
+      "share": 0.3962133268963074
+    },
+    {
+      "attr": "system",
+      "tokens": 2098904,
+      "share": 0.27209999633121384
+    },
+    {
+      "attr": "tool_result|Read",
+      "tokens": 633553,
+      "share": 0.08213326319519557
+    },
+    {
+      "attr": "tool_use|Write",
+      "tokens": 421610,
+      "share": 0.05465710879895311
+    },
+    {
+      "attr": "tool_use|Edit",
+      "tokens": 406529,
+      "share": 0.05270208913437818
+    },
+    {
+      "attr": "user_input",
+      "tokens": 302954,
+      "share": 0.03927468149656381
+    },
+    {
+      "attr": "compact_summary",
+      "tokens": 265129,
+      "share": 0.03437110259103814
+    },
+    {
+      "attr": "tool_use|Agent",
+      "tokens": 252444,
+      "share": 0.032726546519206375
+    },
+    {
+      "attr": "assistant_thinking",
+      "tokens": 166147,
+      "share": 0.021539166918503078
+    },
+    {
+      "attr": "tool_result|Edit",
+      "tokens": 31978,
+      "share": 0.00414562872233976
+    },
+    {
+      "attr": "assistant_text",
+      "tokens": 15210,
+      "share": 0.0019718450562796717
+    },
+    {
+      "attr": "tool_result|Bash",
+      "tokens": 14197,
+      "share": 0.0018405146179846957
+    },
+    {
+      "attr": "tool_use|TaskCreate",
+      "tokens": 13372,
+      "share": 0.0017335862622020874
+    },
+    {
+      "attr": "tool_result|Agent",
+      "tokens": 11548,
+      "share": 0.0014970654258785897
+    },
+    {
+      "attr": "tool_use|Bash",
+      "tokens": 11018,
+      "share": 0.001428309812077218
+    },
+    {
+      "attr": "tool_result|TaskCreate",
+      "tokens": 4078,
+      "share": 0.0005286896279380794
+    },
+    {
+      "attr": "tool_use|TaskUpdate",
+      "tokens": 1888,
+      "share": 0.0002447737464522932
+    },
+    {
+      "attr": "tool_result|Write",
+      "tokens": 1808,
+      "share": 0.00023441935007455073
+    },
+    {
+      "attr": "tool_use|Read",
+      "tokens": 1326,
+      "share": 0.0001718599922044195
+    },
+    {
+      "attr": "tool_result|TaskUpdate",
+      "tokens": 1259,
+      "share": 0.0001631824976348621
+    },
+    {
+      "attr": "tool_result|TaskList",
+      "tokens": 1038,
+      "share": 0.00013460751854162164
+    },
+    {
+      "attr": "tool_result|Glob",
+      "tokens": 976,
+      "share": 0.0001264662760751886
+    },
+    {
+      "attr": "tool_use|Glob",
+      "tokens": 314,
+      "share": 0.00004077008331619295
+    },
+    {
+      "attr": "tool_result|Skill",
+      "tokens": 76,
+      "share": 0.000009835030453320197
+    },
+    {
+      "attr": "tool_use|Skill",
+      "tokens": 64,
+      "share": 0.000008359775885322168
+    },
+    {
+      "attr": "tool_use|TaskList",
+      "tokens": 22,
+      "share": 0.0000028043233029504506
+    }
+  ],
+  "byRequest": [
+    {
+      "index": 1,
+      "time": "11:47",
+      "ratio": 0.237016,
+      "inputTokens": 30338,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.708,
+      "originalCredits": 1.708,
+      "afterCompact": false
+    },
+    {
+      "index": 2,
+      "time": "11:47",
+      "ratio": 0.312805,
+      "inputTokens": 40039,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.705,
+      "originalCredits": 0.705,
+      "afterCompact": false
+    },
+    {
+      "index": 3,
+      "time": "11:47",
+      "ratio": 0.314359,
+      "inputTokens": 40238,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.198,
+      "originalCredits": 0.198,
+      "afterCompact": false
+    },
+    {
+      "index": 4,
+      "time": "11:47",
+      "ratio": 0.314906,
+      "inputTokens": 40308,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.226,
+      "originalCredits": 0.226,
+      "afterCompact": false
+    },
+    {
+      "index": 5,
+      "time": "11:47",
+      "ratio": 0.320469,
+      "inputTokens": 41020,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.263,
+      "originalCredits": 0.263,
+      "afterCompact": false
+    },
+    {
+      "index": 6,
+      "time": "11:48",
+      "ratio": 0.574078,
+      "inputTokens": 73482,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 3.087,
+      "originalCredits": 3.087,
+      "afterCompact": true
+    },
+    {
+      "index": 7,
+      "time": "11:48",
+      "ratio": 0.576508,
+      "inputTokens": 73793,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.357,
+      "originalCredits": 0.357,
+      "afterCompact": false
+    },
+    {
+      "index": 8,
+      "time": "11:48",
+      "ratio": 0.57725,
+      "inputTokens": 73888,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.351,
+      "originalCredits": 0.351,
+      "afterCompact": false
+    },
+    {
+      "index": 9,
+      "time": "11:49",
+      "ratio": 0.578484,
+      "inputTokens": 74046,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.68,
+      "originalCredits": 1.68,
+      "afterCompact": false
+    },
+    {
+      "index": 10,
+      "time": "11:50",
+      "ratio": 0.637781,
+      "inputTokens": 81636,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.762,
+      "originalCredits": 0.762,
+      "afterCompact": false
+    },
+    {
+      "index": 11,
+      "time": "11:50",
+      "ratio": 0.638437,
+      "inputTokens": 81720,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.459,
+      "originalCredits": 0.459,
+      "afterCompact": false
+    },
+    {
+      "index": 12,
+      "time": "12:00",
+      "ratio": 0.658344,
+      "inputTokens": 84268,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 4.782,
+      "originalCredits": 4.782,
+      "afterCompact": false
+    },
+    {
+      "index": 13,
+      "time": "12:00",
+      "ratio": 0.663008,
+      "inputTokens": 84865,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.417,
+      "originalCredits": 0.417,
+      "afterCompact": false
+    },
+    {
+      "index": 14,
+      "time": "12:00",
+      "ratio": 0.663594,
+      "inputTokens": 84940,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.392,
+      "originalCredits": 0.392,
+      "afterCompact": false
+    },
+    {
+      "index": 15,
+      "time": "12:01",
+      "ratio": 0.374797,
+      "inputTokens": 47974,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.634,
+      "originalCredits": 1.634,
+      "afterCompact": true
+    },
+    {
+      "index": 16,
+      "time": "12:01",
+      "ratio": 0.445789,
+      "inputTokens": 57061,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.801,
+      "originalCredits": 0.801,
+      "afterCompact": false
+    },
+    {
+      "index": 17,
+      "time": "12:01",
+      "ratio": 0.449836,
+      "inputTokens": 57579,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.336,
+      "originalCredits": 0.336,
+      "afterCompact": false
+    },
+    {
+      "index": 18,
+      "time": "12:01",
+      "ratio": 0.452594,
+      "inputTokens": 57932,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.677,
+      "originalCredits": 0.677,
+      "afterCompact": false
+    },
+    {
+      "index": 19,
+      "time": "12:01",
+      "ratio": 0.470664,
+      "inputTokens": 60245,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.548,
+      "originalCredits": 0.548,
+      "afterCompact": false
+    },
+    {
+      "index": 20,
+      "time": "12:01",
+      "ratio": 0.478203,
+      "inputTokens": 61210,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.351,
+      "originalCredits": 0.351,
+      "afterCompact": false
+    },
+    {
+      "index": 21,
+      "time": "12:02",
+      "ratio": 0.481086,
+      "inputTokens": 61579,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.432,
+      "originalCredits": 0.432,
+      "afterCompact": false
+    },
+    {
+      "index": 22,
+      "time": "12:02",
+      "ratio": 0.487633,
+      "inputTokens": 62417,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.431,
+      "originalCredits": 0.431,
+      "afterCompact": false
+    },
+    {
+      "index": 23,
+      "time": "12:02",
+      "ratio": 0.492914,
+      "inputTokens": 63093,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.348,
+      "originalCredits": 0.348,
+      "afterCompact": false
+    },
+    {
+      "index": 24,
+      "time": "12:02",
+      "ratio": 0.494781,
+      "inputTokens": 63332,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.352,
+      "originalCredits": 0.352,
+      "afterCompact": false
+    },
+    {
+      "index": 25,
+      "time": "12:02",
+      "ratio": 0.497766,
+      "inputTokens": 63714,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.347,
+      "originalCredits": 0.347,
+      "afterCompact": false
+    },
+    {
+      "index": 26,
+      "time": "12:03",
+      "ratio": 0.500133,
+      "inputTokens": 64017,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.734,
+      "originalCredits": 0.734,
+      "afterCompact": false
+    },
+    {
+      "index": 27,
+      "time": "12:03",
+      "ratio": 0.520781,
+      "inputTokens": 66660,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.56,
+      "originalCredits": 0.56,
+      "afterCompact": false
+    },
+    {
+      "index": 28,
+      "time": "12:03",
+      "ratio": 0.526875,
+      "inputTokens": 67440,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.377,
+      "originalCredits": 0.377,
+      "afterCompact": false
+    },
+    {
+      "index": 29,
+      "time": "12:03",
+      "ratio": 0.528937,
+      "inputTokens": 67704,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.344,
+      "originalCredits": 0.344,
+      "afterCompact": false
+    },
+    {
+      "index": 30,
+      "time": "12:03",
+      "ratio": 0.53068,
+      "inputTokens": 67927,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.38,
+      "originalCredits": 0.38,
+      "afterCompact": false
+    },
+    {
+      "index": 31,
+      "time": "12:03",
+      "ratio": 0.534023,
+      "inputTokens": 68355,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.357,
+      "originalCredits": 0.357,
+      "afterCompact": false
+    },
+    {
+      "index": 32,
+      "time": "12:03",
+      "ratio": 0.535828,
+      "inputTokens": 68586,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.494,
+      "originalCredits": 0.494,
+      "afterCompact": false
+    },
+    {
+      "index": 33,
+      "time": "12:03",
+      "ratio": 0.545203,
+      "inputTokens": 69786,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.428,
+      "originalCredits": 0.428,
+      "afterCompact": false
+    },
+    {
+      "index": 34,
+      "time": "12:03",
+      "ratio": 0.548117,
+      "inputTokens": 70159,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.449,
+      "originalCredits": 0.449,
+      "afterCompact": false
+    },
+    {
+      "index": 35,
+      "time": "12:04",
+      "ratio": 0.55375,
+      "inputTokens": 70880,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.448,
+      "originalCredits": 0.448,
+      "afterCompact": false
+    },
+    {
+      "index": 36,
+      "time": "12:04",
+      "ratio": 0.558398,
+      "inputTokens": 71475,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.374,
+      "originalCredits": 0.374,
+      "afterCompact": false
+    },
+    {
+      "index": 37,
+      "time": "12:04",
+      "ratio": 0.559945,
+      "inputTokens": 71673,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.34,
+      "originalCredits": 0.34,
+      "afterCompact": false
+    },
+    {
+      "index": 38,
+      "time": "12:04",
+      "ratio": 0.658727,
+      "inputTokens": 84317,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.08,
+      "originalCredits": 1.08,
+      "afterCompact": false
+    },
+    {
+      "index": 39,
+      "time": "12:04",
+      "ratio": 0.661758,
+      "inputTokens": 84705,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.413,
+      "originalCredits": 0.413,
+      "afterCompact": false
+    },
+    {
+      "index": 40,
+      "time": "12:04",
+      "ratio": 0.662711,
+      "inputTokens": 84827,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.442,
+      "originalCredits": 0.442,
+      "afterCompact": false
+    },
+    {
+      "index": 41,
+      "time": "14:23",
+      "ratio": 0.379914,
+      "inputTokens": 48629,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.671,
+      "originalCredits": 1.671,
+      "afterCompact": true
+    },
+    {
+      "index": 42,
+      "time": "14:24",
+      "ratio": 0.477687,
+      "inputTokens": 61144,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.996,
+      "originalCredits": 0.996,
+      "afterCompact": false
+    },
+    {
+      "index": 43,
+      "time": "14:24",
+      "ratio": 0.481641,
+      "inputTokens": 61650,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.314,
+      "originalCredits": 0.314,
+      "afterCompact": false
+    },
+    {
+      "index": 44,
+      "time": "14:24",
+      "ratio": 0.48243,
+      "inputTokens": 61751,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.397,
+      "originalCredits": 0.397,
+      "afterCompact": false
+    },
+    {
+      "index": 45,
+      "time": "14:24",
+      "ratio": 0.488008,
+      "inputTokens": 62465,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.343,
+      "originalCredits": 0.343,
+      "afterCompact": false
+    },
+    {
+      "index": 46,
+      "time": "14:24",
+      "ratio": 0.489695,
+      "inputTokens": 62681,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.31,
+      "originalCredits": 0.31,
+      "afterCompact": false
+    },
+    {
+      "index": 47,
+      "time": "14:24",
+      "ratio": 0.491031,
+      "inputTokens": 62852,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.435,
+      "originalCredits": 0.435,
+      "afterCompact": false
+    },
+    {
+      "index": 48,
+      "time": "14:24",
+      "ratio": 0.497898,
+      "inputTokens": 63731,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.384,
+      "originalCredits": 0.384,
+      "afterCompact": false
+    },
+    {
+      "index": 49,
+      "time": "14:24",
+      "ratio": 0.500766,
+      "inputTokens": 64098,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.369,
+      "originalCredits": 0.369,
+      "afterCompact": false
+    },
+    {
+      "index": 50,
+      "time": "14:24",
+      "ratio": 0.50407,
+      "inputTokens": 64521,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.391,
+      "originalCredits": 0.391,
+      "afterCompact": false
+    },
+    {
+      "index": 51,
+      "time": "14:25",
+      "ratio": 0.508102,
+      "inputTokens": 65037,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.356,
+      "originalCredits": 0.356,
+      "afterCompact": false
+    },
+    {
+      "index": 52,
+      "time": "14:25",
+      "ratio": 0.510305,
+      "inputTokens": 65319,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.434,
+      "originalCredits": 0.434,
+      "afterCompact": false
+    },
+    {
+      "index": 53,
+      "time": "14:25",
+      "ratio": 0.517687,
+      "inputTokens": 66264,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.372,
+      "originalCredits": 0.372,
+      "afterCompact": false
+    },
+    {
+      "index": 54,
+      "time": "14:25",
+      "ratio": 0.519383,
+      "inputTokens": 66481,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.379,
+      "originalCredits": 0.379,
+      "afterCompact": false
+    },
+    {
+      "index": 55,
+      "time": "14:25",
+      "ratio": 0.522992,
+      "inputTokens": 66943,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.35,
+      "originalCredits": 0.35,
+      "afterCompact": false
+    },
+    {
+      "index": 56,
+      "time": "14:25",
+      "ratio": 0.524672,
+      "inputTokens": 67158,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.368,
+      "originalCredits": 0.368,
+      "afterCompact": false
+    },
+    {
+      "index": 57,
+      "time": "14:25",
+      "ratio": 0.52768,
+      "inputTokens": 67543,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.448,
+      "originalCredits": 0.448,
+      "afterCompact": false
+    },
+    {
+      "index": 58,
+      "time": "14:25",
+      "ratio": 0.533727,
+      "inputTokens": 68317,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.514,
+      "originalCredits": 0.514,
+      "afterCompact": false
+    },
+    {
+      "index": 59,
+      "time": "14:26",
+      "ratio": 0.541633,
+      "inputTokens": 69329,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.395,
+      "originalCredits": 0.395,
+      "afterCompact": false
+    },
+    {
+      "index": 60,
+      "time": "14:26",
+      "ratio": 0.543586,
+      "inputTokens": 69579,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.349,
+      "originalCredits": 0.349,
+      "afterCompact": false
+    },
+    {
+      "index": 61,
+      "time": "14:26",
+      "ratio": 0.545172,
+      "inputTokens": 69782,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.363,
+      "originalCredits": 0.363,
+      "afterCompact": false
+    },
+    {
+      "index": 62,
+      "time": "14:26",
+      "ratio": 0.547469,
+      "inputTokens": 70076,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.39,
+      "originalCredits": 0.39,
+      "afterCompact": false
+    },
+    {
+      "index": 63,
+      "time": "14:26",
+      "ratio": 0.551961,
+      "inputTokens": 70651,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.497,
+      "originalCredits": 0.497,
+      "afterCompact": false
+    },
+    {
+      "index": 64,
+      "time": "14:26",
+      "ratio": 0.559141,
+      "inputTokens": 71570,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.793,
+      "originalCredits": 0.793,
+      "afterCompact": false
+    },
+    {
+      "index": 65,
+      "time": "14:26",
+      "ratio": 0.578367,
+      "inputTokens": 74031,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.522,
+      "originalCredits": 0.522,
+      "afterCompact": false
+    },
+    {
+      "index": 66,
+      "time": "14:27",
+      "ratio": 0.581742,
+      "inputTokens": 74463,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.509,
+      "originalCredits": 0.509,
+      "afterCompact": false
+    },
+    {
+      "index": 67,
+      "time": "14:27",
+      "ratio": 0.589016,
+      "inputTokens": 75394,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.497,
+      "originalCredits": 0.497,
+      "afterCompact": false
+    },
+    {
+      "index": 68,
+      "time": "14:27",
+      "ratio": 0.594469,
+      "inputTokens": 76092,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.422,
+      "originalCredits": 0.422,
+      "afterCompact": false
+    },
+    {
+      "index": 69,
+      "time": "14:27",
+      "ratio": 0.597016,
+      "inputTokens": 76418,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.391,
+      "originalCredits": 0.391,
+      "afterCompact": false
+    },
+    {
+      "index": 70,
+      "time": "14:27",
+      "ratio": 0.598969,
+      "inputTokens": 76668,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.404,
+      "originalCredits": 0.404,
+      "afterCompact": false
+    },
+    {
+      "index": 71,
+      "time": "14:27",
+      "ratio": 0.601594,
+      "inputTokens": 77004,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.493,
+      "originalCredits": 0.493,
+      "afterCompact": false
+    },
+    {
+      "index": 72,
+      "time": "14:27",
+      "ratio": 0.607906,
+      "inputTokens": 77812,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.46,
+      "originalCredits": 0.46,
+      "afterCompact": false
+    },
+    {
+      "index": 73,
+      "time": "14:28",
+      "ratio": 0.612805,
+      "inputTokens": 78439,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.418,
+      "originalCredits": 0.418,
+      "afterCompact": false
+    },
+    {
+      "index": 74,
+      "time": "14:28",
+      "ratio": 0.614859,
+      "inputTokens": 78702,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.373,
+      "originalCredits": 0.373,
+      "afterCompact": false
+    },
+    {
+      "index": 75,
+      "time": "14:28",
+      "ratio": 0.615461,
+      "inputTokens": 78779,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.452,
+      "originalCredits": 0.452,
+      "afterCompact": false
+    },
+    {
+      "index": 76,
+      "time": "15:36",
+      "ratio": 0.380414,
+      "inputTokens": 48693,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.884,
+      "originalCredits": 1.884,
+      "afterCompact": true
+    },
+    {
+      "index": 77,
+      "time": "15:36",
+      "ratio": 0.424719,
+      "inputTokens": 54364,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.629,
+      "originalCredits": 0.629,
+      "afterCompact": false
+    },
+    {
+      "index": 78,
+      "time": "15:36",
+      "ratio": 0.429227,
+      "inputTokens": 54941,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.343,
+      "originalCredits": 0.343,
+      "afterCompact": false
+    },
+    {
+      "index": 79,
+      "time": "15:36",
+      "ratio": 0.432984,
+      "inputTokens": 55422,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.315,
+      "originalCredits": 0.315,
+      "afterCompact": false
+    },
+    {
+      "index": 80,
+      "time": "15:37",
+      "ratio": 0.435086,
+      "inputTokens": 55691,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.846,
+      "originalCredits": 0.846,
+      "afterCompact": false
+    },
+    {
+      "index": 81,
+      "time": "15:37",
+      "ratio": 0.461023,
+      "inputTokens": 59011,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.474,
+      "originalCredits": 0.474,
+      "afterCompact": false
+    },
+    {
+      "index": 82,
+      "time": "15:37",
+      "ratio": 0.463039,
+      "inputTokens": 59269,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.339,
+      "originalCredits": 0.339,
+      "afterCompact": false
+    },
+    {
+      "index": 83,
+      "time": "15:39",
+      "ratio": 0.466094,
+      "inputTokens": 59660,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 2.15,
+      "originalCredits": 2.15,
+      "afterCompact": false
+    },
+    {
+      "index": 84,
+      "time": "15:40",
+      "ratio": 0.553,
+      "inputTokens": 70784,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.509,
+      "originalCredits": 1.509,
+      "afterCompact": false
+    },
+    {
+      "index": 85,
+      "time": "15:41",
+      "ratio": 0.580828,
+      "inputTokens": 74346,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.234,
+      "originalCredits": 1.234,
+      "afterCompact": false
+    },
+    {
+      "index": 86,
+      "time": "15:42",
+      "ratio": 0.612852,
+      "inputTokens": 78445,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 1.222,
+      "originalCredits": 1.222,
+      "afterCompact": false
+    },
+    {
+      "index": 87,
+      "time": "15:42",
+      "ratio": 0.642297,
+      "inputTokens": 82214,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.571,
+      "originalCredits": 0.571,
+      "afterCompact": false
+    },
+    {
+      "index": 88,
+      "time": "15:42",
+      "ratio": 0.643039,
+      "inputTokens": 82309,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.4,
+      "originalCredits": 0.4,
+      "afterCompact": false
+    },
+    {
+      "index": 89,
+      "time": "15:42",
+      "ratio": 0.644719,
+      "inputTokens": 82524,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.415,
+      "originalCredits": 0.415,
+      "afterCompact": false
+    },
+    {
+      "index": 90,
+      "time": "15:42",
+      "ratio": 0.648477,
+      "inputTokens": 83005,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.441,
+      "originalCredits": 0.441,
+      "afterCompact": false
+    },
+    {
+      "index": 91,
+      "time": "15:42",
+      "ratio": 0.652695,
+      "inputTokens": 83545,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.43,
+      "originalCredits": 0.43,
+      "afterCompact": false
+    },
+    {
+      "index": 92,
+      "time": "15:42",
+      "ratio": 0.654867,
+      "inputTokens": 83823,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.423,
+      "originalCredits": 0.423,
+      "afterCompact": false
+    },
+    {
+      "index": 93,
+      "time": "15:43",
+      "ratio": 0.658609,
+      "inputTokens": 84302,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.429,
+      "originalCredits": 0.429,
+      "afterCompact": false
+    },
+    {
+      "index": 94,
+      "time": "15:43",
+      "ratio": 0.662438,
+      "inputTokens": 84792,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.432,
+      "originalCredits": 0.432,
+      "afterCompact": false
+    },
+    {
+      "index": 95,
+      "time": "15:43",
+      "ratio": 0.665891,
+      "inputTokens": 85234,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.466,
+      "originalCredits": 0.466,
+      "afterCompact": false
+    },
+    {
+      "index": 96,
+      "time": "15:43",
+      "ratio": 0.670883,
+      "inputTokens": 85873,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.443,
+      "originalCredits": 0.443,
+      "afterCompact": false
+    },
+    {
+      "index": 97,
+      "time": "15:43",
+      "ratio": 0.672641,
+      "inputTokens": 86098,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.426,
+      "originalCredits": 0.426,
+      "afterCompact": false
+    },
+    {
+      "index": 98,
+      "time": "15:43",
+      "ratio": 0.674539,
+      "inputTokens": 86341,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.417,
+      "originalCredits": 0.417,
+      "afterCompact": false
+    },
+    {
+      "index": 99,
+      "time": "15:43",
+      "ratio": 0.675953,
+      "inputTokens": 86522,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.415,
+      "originalCredits": 0.415,
+      "afterCompact": false
+    },
+    {
+      "index": 100,
+      "time": "15:43",
+      "ratio": 0.677359,
+      "inputTokens": 86702,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.42,
+      "originalCredits": 0.42,
+      "afterCompact": false
+    },
+    {
+      "index": 101,
+      "time": "15:44",
+      "ratio": 0.678969,
+      "inputTokens": 86908,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.433,
+      "originalCredits": 0.433,
+      "afterCompact": false
+    },
+    {
+      "index": 102,
+      "time": "15:44",
+      "ratio": 0.685422,
+      "inputTokens": 87734,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.464,
+      "originalCredits": 0.464,
+      "afterCompact": false
+    },
+    {
+      "index": 103,
+      "time": "15:44",
+      "ratio": 0.687305,
+      "inputTokens": 87975,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.449,
+      "originalCredits": 0.449,
+      "afterCompact": false
+    },
+    {
+      "index": 104,
+      "time": "15:46",
+      "ratio": 0.690039,
+      "inputTokens": 88325,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.443,
+      "originalCredits": 0.443,
+      "afterCompact": false
+    },
+    {
+      "index": 105,
+      "time": "15:52",
+      "ratio": 0.701953,
+      "inputTokens": 89850,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 5.008,
+      "originalCredits": 5.008,
+      "afterCompact": false
+    },
+    {
+      "index": 106,
+      "time": "15:52",
+      "ratio": 0.716766,
+      "inputTokens": 91746,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.527,
+      "originalCredits": 0.527,
+      "afterCompact": false
+    },
+    {
+      "index": 107,
+      "time": "15:54",
+      "ratio": 0.719414,
+      "inputTokens": 92085,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.457,
+      "originalCredits": 0.457,
+      "afterCompact": false
+    },
+    {
+      "index": 108,
+      "time": "15:55",
+      "ratio": 0.72057,
+      "inputTokens": 92233,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.443,
+      "originalCredits": 0.443,
+      "afterCompact": false
+    },
+    {
+      "index": 109,
+      "time": "15:55",
+      "ratio": 0.721531,
+      "inputTokens": 92356,
+      "outputTokens": null,
+      "usageSource": "transcript-ratio",
+      "credits": 0.683,
+      "originalCredits": 0.683,
+      "afterCompact": false
+    }
+  ],
+  "identity": {
+    "sumAttributed": 7713723,
+    "billedInputTokens": 7713723,
+    "absDiff": 0,
+    "ok": true
+  },
+  "pluginVersion": "2.7.4",
+  "selfCmd": "\"C:\\Users\\29670\\.qoder-cn\\plugins\\cache\\qoder-marketplace\\qoder-credits-inspector\\2.7.4\\bin\\credits-inspector.cmd\" cli",
+  "linkHealth": {
+    "matched": 0,
+    "requests": 109,
+    "coverage": 0,
+    "usageSource": "transcript-ratio",
+    "breakdown": {
+      "proxy": 0,
+      "transcriptTokens": 0,
+      "transcriptRatio": 109
+    },
+    "logRecords": 0,
+    "lastRecordAt": null,
+    "recentRequests": 0,
+    "proxyErrors": null,
+    "clientAbort": null,
+    "clientAbortMaxMs": null,
+    "upstreamRejected": null,
+    "aborted": null,
+    "truncated": null,
+    "noUsage": null,
+    "slowestMs": null,
+    "supersededFailure": null
+  },
+  "subagents": {
+    "scanned": true,
+    "dir": "C:\\Users\\29670\\.qoder-cn\\projects\\D--UGit-multdc\\c4c64b31-83f6-409f-89bf-cd9bcc89f6e0\\subagents",
+    "probedPaths": [
+      "C:\\Users\\29670\\.qoder-cn\\projects\\D--UGit-multdc\\c4c64b31-83f6-409f-89bf-cd9bcc89f6e0\\subagents",
+      "C:\\Users\\29670\\.qoder-cn\\projects\\c4c64b31-83f6-409f-89bf-cd9bcc89f6e0\\subagents"
+    ],
+    "reason": "ok",
+    "count": 3,
+    "items": [
+      {
+        "agentId": "ageneral-purpose-ce95368b862d6f29",
+        "agentType": "general-purpose",
+        "description": "Write Data Plane docs",
+        "toolUseId": "call_ecdeef7b17674af79e9d4067",
+        "roundTrips": 14,
+        "billedInputTokens": 926445,
+        "peakContextRatio": 0.5896,
+        "credits": 18.864,
+        "originalCredits": 18.864,
+        "error": null
+      },
+      {
+        "agentId": "ageneral-purpose-fe3bc89eb5812d42",
+        "agentType": "general-purpose",
+        "description": "Write Coordination Plane docs",
+        "toolUseId": "call_bc1271200d914d348136cc5a",
+        "roundTrips": 9,
+        "billedInputTokens": 525205,
+        "peakContextRatio": 0.5201,
+        "credits": 13.85,
+        "originalCredits": 13.85,
+        "error": null
+      },
+      {
+        "agentId": "ageneral-purpose-4c5e25e57f3e921f",
+        "agentType": "general-purpose",
+        "description": "Write Control Plane docs",
+        "toolUseId": "call_fbd5761e17dc46ab98397b1f",
+        "roundTrips": 6,
+        "billedInputTokens": 321044,
+        "peakContextRatio": 0.4794,
+        "credits": 11.955,
+        "originalCredits": 11.955,
+        "error": null
+      }
+    ],
+    "totals": {
+      "roundTrips": 29,
+      "billedInputTokens": 1772694,
+      "credits": 44.669,
+      "originalCredits": 44.669
+    },
+    "combined": {
+      "roundTrips": 138,
+      "billedInputTokens": 9486417,
+      "credits": 116.074,
+      "originalCredits": 116.074
+    }
+  },
+  "manual": null,
+  "artifacts": {
+    "report": "report.json",
+    "canvas": "使用产品设计的相关技能，梳理当前项目，构建项目架__c4c64b31.canvas.tsx"
+  }
+}
