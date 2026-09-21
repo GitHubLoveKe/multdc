@@ -33,7 +33,7 @@ Zone Manifest (全区完整视图)
 │               │  Scheduler  │                 │
 │               └──────┬──────┘                 │
 └──────────────────────┼────────────────────────┘
-                       │ HTTP/gRPC 调用
+                       │ Push 采集指令 + Pull 任务同步
                        ▼
                   Agent 采集器
 ```
@@ -80,6 +80,8 @@ Zone Manifest (全区完整视图)
 | Agent 调度 | 采集任务分配 | P0 | 按类型/负载/健康分配 |
 | Agent 调度 | Agent 健康监控 | P0 | 周期性检查 |
 | Agent 调度 | Agent 故障重分配 | P1 | Agent 失效时迁移 target |
+| Agent 调度 | SyncTasks 任务同步 | P0 | Agent 周期性同步任务列表（Pull 安全网） |
+| Agent 调度 | 采集间隔层级解析 | P1 | 平台默认 → TaskSpec → Target 三级配置 |
 | 状态上报 | Coordinator 心跳（15s） | P0 | alive session |
 | 状态上报 | 控制面观测矩阵（10s） | P0 | slot/agent/采集统计 |
 | 状态上报 | Peer Advertisement（3s） | P0 | 节点间状态同步 |
@@ -321,7 +323,49 @@ Job Scheduler 检测到 Agent 健康检查失败
         └── 不再分配新 target，等待恢复或手动干预
 ```
 
-#### 3.5.4 Agent 生命周期管理
+#### 3.5.4 Push + Pull 双模任务分配
+
+任务分配采用 Push 为主、Pull 为辅的双模机制：
+
+**Push 模式（主路径）**：
+- 当 Manifest 变更、slot 归属变化、或新 target 需要分配时，Job Scheduler 主动发送 CollectionInstruction 到 Agent
+- 事件驱动，延迟低（毫秒级）
+- Agent 收到指令后自行完成采集和数据推送
+
+**Pull 模式（安全网）**：
+- Agent 每 30s 向 Job Scheduler 发送 SyncTasks 请求，携带当前持有的任务列表
+- Job Scheduler 对比自身视图，返回 diff（需要新增/删除/更新的任务）
+- 补偿因网络抖动、消息丢失等原因导致的任务不一致
+- SyncTasks 也是 Agent 向 Scheduler 报告存活状态的机会
+
+**Agent 自主执行**：
+- Agent 收到采集任务后，自主按 scrape_interval 周期执行采集
+- 采集数据由 Agent 直接推送到 OTel Collector（不经过 Scheduler）
+- Agent 向 Scheduler 上报的是采集元数据（成功/失败/耗时），而非数据本身
+
+#### 3.5.5 采集间隔配置层级
+
+采集间隔（scrape_interval）遵循以下优先级（从高到低）：
+
+```
+平台默认值 (platform_default_scrape_interval)
+    │
+    ▼  被 TaskSpec 覆盖
+TaskSpec 级别 (task_scrape_interval)
+    │
+    ▼  被 Target 级别覆盖
+Target 级别 (target_scrape_interval)
+```
+
+| 层级 | 配置来源 | 默认值 | 说明 |
+|------|---------|--------|------|
+| 平台默认 | 平台全局配置 | 60s | 所有任务的默认采集间隔 |
+| TaskSpec 级别 | 控制面任务定义 | 继承平台默认 | 特定任务类型的采集间隔 |
+| Target 级别 | 实例台账配置 | 继承 TaskSpec | 特定目标的采集间隔 |
+
+CollectionInstruction 中的 scrape_interval 字段已经过层级解析，Agent 直接使用最终值。
+
+#### 3.5.6 Agent 生命周期管理
 
 ```
                注册
@@ -684,6 +728,16 @@ Job Scheduler                             Agent
     │                                        │  停止采集
     │  RevokeAck(agent_id)                   │
     │◀──────────────────────────────────────│
+    │                                        │
+    │  SyncTasks (30s)                       │
+    │  { current_tasks: [task_id, ...] }     │
+    │───────────────────────────────────────▶│
+    │                                        │  对比 Scheduler 视图
+    │  SyncTasksResponse                     │  返回 diff
+    │  { add_tasks: [...],                   │
+    │    remove_tasks: [...],                │
+    │    update_tasks: [...] }               │
+    │◀───────────────────────────────────────│
 ```
 
 | 接口 | 方向 | 协议 | 频率 | 说明 |
@@ -693,6 +747,8 @@ Job Scheduler                             Agent
 | TaskResult | Agent → JS | HTTP/gRPC | 每次采集后 | 上报采集结果 |
 | HealthCheck | JS → Agent | HTTP | 5s | 健康检查 |
 | RevokeTask | JS → Agent | HTTP/gRPC | 事件驱动 | 撤销采集任务 |
+| SyncTasks | Agent → JS | HTTP/gRPC | 30s | Agent 同步任务列表（Pull 安全网） |
+| SyncTasksResponse | JS → Agent | HTTP/gRPC | 响应 | 返回任务 diff（新增/删除/更新） |
 
 ---
 
@@ -718,15 +774,15 @@ Job Scheduler                             Agent
 
 **[建议]**：阶段 1 用方案 A（均分），阶段 2 评估方案 B（加权）。方案 C 留作长期优化。
 
-### DEC-JS-03：Agent 调度模式
+### DEC-JS-03：Agent 任务调度模式
 
 | 方案 | 描述 | 优点 | 缺点 |
 |------|------|------|------|
-| A：Push（Scheduler 调用 Agent） | Scheduler 主动发送采集指令 | 控制力强；实时性好 | Scheduler 需要维护 Agent 状态 |
-| B：Pull（Agent 轮询 Scheduler） | Agent 主动拉取待执行的采集任务 | 解耦；Agent 自主控制节奏 | 延迟较高；轮询开销 |
-| C：消息队列 | 通过 MQ 解调度和执行 | 完全解耦；可缓冲 | 引入 MQ 依赖；运维复杂度 |
+| A：纯 Push（Scheduler 主动分配） | Scheduler 主动发送采集指令到 Agent | 控制力强；实时性好 | 消息丢失时 Agent 可能遗漏任务；需要可靠消息投递 |
+| B：纯 Pull（Agent 轮询 Scheduler） | Agent 主动拉取待执行的采集任务 | 解耦；Agent 自主控制节奏 | 延迟较高；轮询开销 |
+| C：Push 主 + Pull 辅（当前） | Push 为主要分配方式，Agent 每 30s 通过 SyncTasks 同步任务列表作为安全网 | 实时性好 + 一致性保障；Push 保证低延迟分配，Pull 兜底防止消息丢失 | 需要两套机制 |
 
-**[建议]**：方案 A（Push）。与 Prometheus 生态的 push/pull 模型一致，且 Scheduler 已持有完整的 Agent 状态信息，Push 模式更自然。
+**[建议]**：方案 C（Push 主 + Pull 辅）。事件驱动的 Push 模式保证任务分配的实时性，Agent 周期性 SyncTasks（默认 30s）作为安全网，确保因网络抖动等原因遗漏的 Push 消息能被补偿。SyncTasks 携带 Agent 当前任务列表，Scheduler 对比后返回 diff（需要新增/删除的任务）。
 
 ### DEC-JS-04：Peer 通信传输协议
 

@@ -67,15 +67,24 @@ Agent 不参与 slot 归属协商，不知道 epoch fencing，不直接连接存
 
 ### 3.1 Agent 类型矩阵
 
-| Agent 类型 | 采集目标 | 协议 | 返回格式 | 典型场景 |
-|-----------|---------|------|---------|---------|
-| Scrape Agent | HTTP/HTTPS 端点 | HTTP GET | Prometheus text/exposition | 标准 Prometheus 指标采集 |
-| SNMP Agent | 网络设备、 legacy 系统 | SNMP v2c/v3 | 指标键值对 | 路由器、交换机、打印机 |
-| Probe Agent | TCP/HTTP 端点 | TCP/HTTP | 拨测结果（延迟、状态） | 可用性探测、延迟测量 |
-| Oracle Agent | Oracle 数据库 | Oracle JDBC/SQL | Oracle 特有指标 | 表空间、会话、SGA/PGA |
-| MySQL Agent | MySQL 数据库 | MySQL protocol | MySQL 特有指标 | 连接数、查询、复制状态 |
-| Windows Agent | Windows 主机 | WMI/WinRM | Windows 性能计数器 | CPU、内存、磁盘、服务 |
-| Custom Agent | 可扩展 | 自定义 | 可配置 | 未来扩展的插件架构 |
+Agent 采用插件架构，核心标准插件随主程序发布，扩展插件作为子进程热加载。
+
+**内置标准插件**（随 Agent 主程序发布，进程内运行）：
+
+| Agent 类型 | 采集目标 | 协议 | 返回格式 | 典型场景 | 加载方式 |
+|-----------|---------|------|---------|---------|---------|
+| Scrape Agent | HTTP/HTTPS 端点 | HTTP GET | Prometheus text/exposition | 标准 Prometheus 指标采集 | 内置 |
+| SNMP Agent | 网络设备、legacy 系统 | SNMP v2c/v3 | 指标键值对 | 路由器、交换机、打印机 | 内置 |
+| Probe Agent | TCP/HTTP 端点 | TCP/HTTP | 拨测结果（延迟、状态） | 可用性探测、延迟测量 | 内置 |
+
+**扩展插件**（作为独立子进程加载，支持热加载和故障隔离）：
+
+| Agent 类型 | 采集目标 | 协议 | 返回格式 | 典型场景 | 加载方式 |
+|-----------|---------|------|---------|---------|---------|
+| Oracle Agent | Oracle 数据库 | Oracle JDBC/SQL | Oracle 特有指标 | 表空间、会话、SGA/PGA | 插件 |
+| MySQL Agent | MySQL 数据库 | MySQL protocol | MySQL 特有指标 | 连接数、查询、复制状态 | 插件 |
+| Windows Agent | Windows 主机 | WMI/WinRM | Windows 性能计数器 | CPU、内存、磁盘、服务 | 插件 |
+| Custom Agent | 可扩展 | 自定义 | 可配置 | 用户自定义插件架构（详见 3.7） | 插件 |
 
 ### 3.2 Scrape Agent
 
@@ -188,6 +197,8 @@ ProbeResult:
 
 ### 3.5 数据库专用 Agent
 
+> **注意**：数据库专用 Agent（Oracle Agent、MySQL Agent）实现为**扩展插件**（扩展插件），以独立子进程方式加载。其核心采集功能与上述描述一致，但运行在隔离进程中，可独立启动、停止和更新，不影响 Agent 主进程和其他插件的运行。详见 3.7 插件架构设计。
+
 #### 3.5.1 Oracle Agent
 
 ```
@@ -239,6 +250,8 @@ MySQL Agent 采集指标：
 
 ### 3.6 Windows Agent
 
+> **注意**：Windows Agent 实现为**扩展插件**（扩展插件），以独立子进程方式加载。其核心采集功能与上述描述一致，但运行在隔离进程中，可独立启动、停止和更新，不影响 Agent 主进程和其他插件的运行。详见 3.7 插件架构设计。
+
 ```
 Windows Agent 采集方式：
     │
@@ -261,38 +274,157 @@ Windows Agent 采集指标：
     └── 事件日志 (Error/Warning count)
 ```
 
-### 3.7 Custom Agent 插件架构
+### 3.7 插件架构设计
+
+Agent 从阶段 1 即采用插件架构。核心标准插件（Scrape、SNMP、Probe）内置于主进程，保证基础采集的稳定性；扩展插件（Oracle、MySQL、Windows、Custom）作为子进程加载，支持热加载和故障隔离。
+
+#### 3.7.1 插件架构总览
 
 ```
-Custom Agent 插件接口：
-
-┌─────────────────────────────────────────────┐
-│ Agent Plugin Interface                       │
-│                                               │
-│  ┌──────────────┐  ┌──────────────┐         │
-│  │  Capability   │  │  Collection  │         │
-│  │  Declaration  │  │  Execution   │         │
-│  │              │  │              │         │
-│  │  · agent_type│  │  · collect() │         │
-│  │  · config    │  │  · health()  │         │
-│  │    schema    │  │  · stop()    │         │
-│  │  · version   │  │              │         │
-│  └──────────────┘  └──────────────┘         │
-│                                               │
-│  ┌──────────────┐  ┌──────────────┐         │
-│  │  Data Output  │  │  Lifecycle   │         │
-│  │              │  │              │         │
-│  │  · format()  │  │  · init()    │         │
-│  │  · push()    │  │  · start()   │         │
-│  │              │  │  · shutdown()│         │
-│  └──────────────┘  └──────────────┘         │
-└─────────────────────────────────────────────┘
-
-插件加载方式：
-  · 动态链接库 (.so / .dll)
-  · 独立进程 (subprocess)
-  · WebAssembly (WASM) — 未来探索
+Agent 主进程
+├── Plugin Manager (插件管理器)
+│   ├── 插件发现 (扫描插件目录)
+│   ├── 插件加载 (启动子进程)
+│   ├── 插件健康监控
+│   └── 插件生命周期管理
+│
+├── 内置插件 (进程内)
+│   ├── Scrape Plugin
+│   ├── SNMP Plugin
+│   └── Probe Plugin
+│
+└── 扩展插件 (子进程)
+    ├── Oracle Plugin (独立进程)
+    ├── MySQL Plugin (独立进程)
+    ├── Windows Plugin (独立进程)
+    └── Custom Plugin (用户自定义)
 ```
+
+Plugin Manager 负责插件的全生命周期管理，包括发现、加载、健康监控和卸载。内置插件在编译时链接到主程序，随主进程启动；扩展插件以独立子进程方式运行，通过 Plugin Manager 统一管理。
+
+#### 3.7.2 插件接口协议
+
+扩展插件通过 stdin/stdout 或 Unix Socket 与 Plugin Manager 通信。插件启动时向 Plugin Manager 注册能力声明，接收采集指令（JSON 格式），执行采集并返回结果，同时定期发送心跳保持连接。
+
+```yaml
+PluginCapability:
+  plugin_name: string           # 插件名称
+  plugin_type: string           # oracle | mysql | windows | custom
+  version: string               # 插件版本
+  supported_protocols: [string] # 支持的协议
+  max_concurrent_targets: uint32 # 最大并发采集数
+  config_schema: object         # 插件配置 JSON Schema
+
+PluginCollectRequest:
+  task_id: string
+  target: Target
+  credential_ref: string
+  timeout: duration
+
+PluginCollectResponse:
+  task_id: string
+  success: bool
+  metrics: [Metric]
+  error: string
+  duration_ms: float
+```
+
+插件通信流程：
+
+```
+Plugin Manager                          扩展插件 (子进程)
+  │                                         │
+  │  (插件启动)                               │
+  │◀────────────────────────────────────────│  发送 PluginCapability 注册
+  │                                         │
+  │  PluginCollectRequest (JSON)            │
+  │────────────────────────────────────────▶│  执行采集
+  │                                         │
+  │  PluginCollectResponse (JSON)           │
+  │◀────────────────────────────────────────│  返回结果
+  │                                         │
+  │  Heartbeat                              │
+  │◀────────────────────────────────────────│  定期心跳
+  │                                         │
+```
+
+#### 3.7.3 插件热加载
+
+Plugin Manager 支持插件的热加载，无需重启 Agent 主进程即可管理扩展插件的生命周期。
+
+- **插件目录扫描**：Plugin Manager 定期扫描插件目录（默认 30s），检测插件变更
+- **新插件检测**：发现新的插件二进制/配置文件时自动加载，启动子进程并等待能力注册
+- **插件更新**：检测到插件版本变更时，优雅停止旧版本（等待进行中的采集完成），启动新版本
+- **插件卸载**：插件文件被移除时，优雅停止子进程并清理相关资源
+- **热加载隔离**：热加载过程不影响其他插件和主进程的正常运行
+
+```
+热加载流程：
+  Plugin Manager 扫描插件目录 (每 30s)
+      │
+      ├── 发现新插件
+      │   └── 启动子进程 → 等待能力注册 → 标记为 RUNNING → 可分配任务
+      │
+      ├── 发现版本变更
+      │   └── 优雅停止旧版本 → 启动新版本 → 等待能力注册 → 标记为 RUNNING
+      │
+      ├── 发现插件被移除
+      │   └── 优雅停止子进程 → 清理资源 → 标记为 STOPPED
+      │
+      └── 无变更
+          └── 继续监控
+```
+
+#### 3.7.4 插件隔离与故障处理
+
+扩展插件运行在独立子进程中，与主进程和其他插件完全隔离。Plugin Manager 负责监控插件健康状态并处理故障。
+
+- **进程隔离**：插件运行在独立子进程，崩溃不影响主进程和其他插件
+- **存活监控**：Plugin Manager 通过心跳机制监控插件进程存活状态
+- **自动重启**：插件崩溃时自动重启，采用指数退避策略，最大重试 5 次
+- **错误阈值**：连续失败超过阈值后标记为 ERROR，停止分配新任务
+- **资源限制**：插件的内存/CPU 资源限制（可选配置），防止单个插件耗尽节点资源
+
+```
+故障处理流程：
+  插件崩溃/心跳丢失
+      │
+      ├── 重启次数 < 5
+      │   └── 指数退避等待 → 重启子进程 → 重新注册能力
+      │
+      ├── 重启次数 >= 5
+      │   └── 标记为 ERROR → 停止分配新任务 → 等待人工介入或自动恢复
+      │
+      └── 插件恢复正常
+          └── 重置错误计数 → 标记为 RUNNING → 恢复任务分配
+```
+
+#### 3.7.5 PluginInventory 上报
+
+Agent 向 Job Scheduler 上报已安装插件清单，使平台能够感知各节点可用的插件及其状态。
+
+```yaml
+PluginInventory:
+  agent_id: string
+  plugins:
+    - plugin_name: string
+      plugin_type: string
+      version: string
+      load_type: enum          # built-in | subprocess
+      state: enum              # RUNNING | ERROR | STOPPED | LOADING
+      loaded_at: timestamp
+      last_error: string
+      capabilities: PluginCapability
+      current_load: uint32     # 当前承载 target 数
+      pid: uint32              # 子进程 PID (subprocess 类型)
+  reported_at: timestamp
+```
+
+上报时机：
+
+- Agent 启动时全量上报
+- 插件状态变更时增量上报
+- Job Scheduler 周期性请求全量上报（默认 30s）
 
 ### 3.8 Agent 生命周期
 
@@ -487,6 +619,29 @@ AgentBuffer:
     drain_rate: float                 # 缓冲消耗速率 (items/sec)
 ```
 
+### 4.5 PluginDescriptor（插件描述符）
+
+```yaml
+PluginDescriptor:
+  plugin_id: string              # 插件唯一标识 (格式: {agent_id}-{plugin_type})
+  plugin_name: string            # 插件名称
+  plugin_type: string            # scrape | snmp | probe | oracle | mysql | windows | custom
+  load_type: enum                # built-in | subprocess
+  state: enum                    # LOADING | RUNNING | ERROR | STOPPED
+  version: string                # 插件版本
+  binary_path: string            # 插件二进制路径 (subprocess 类型)
+  pid: uint32                    # 子进程 PID (subprocess 类型)
+  capabilities: PluginCapability # 能力声明
+  current_load: uint32           # 当前承载 target 数
+  max_capacity: uint32           # 最大承载能力
+  started_at: timestamp          # 启动时间
+  last_heartbeat: timestamp      # 最后心跳时间
+  consecutive_errors: uint32     # 连续错误次数
+  last_error: string             # 最后错误信息
+  restart_count: uint32          # 重启次数
+  config: object                 # 插件特有配置
+```
+
 ---
 
 ## 五、接口与交互
@@ -557,15 +712,16 @@ Collector 慢（背压）：
 
 ### 5.3 Agent 内部接口汇总
 
-| 接口 | 方向 | 协议 | 说明 |
-|------|------|------|------|
-| RegisterAgent | Agent → JS | HTTP/gRPC | Agent 注册到 Job Scheduler |
-| HealthCheck | JS → Agent | HTTP | Job Scheduler 健康检查 |
-| AssignTask | JS → Agent | HTTP/gRPC | 分配采集任务 |
-| RevokeTask | JS → Agent | HTTP/gRPC | 撤销采集任务 |
-| CollectionReport | Agent → JS | HTTP/gRPC | 采集结果上报（元数据，非数据本身） |
-| PushMetrics | Agent → OTel | OTLP HTTP/gRPC | 采集数据推送到 OTel Collector |
-| GetCredential | Agent → CredService | HTTP | 获取采集凭据（通过凭据引用） |
+| 接口 | 方向 | 协议 | 频率 | 说明 |
+|------|------|------|------|------|
+| RegisterAgent | Agent → JS | HTTP/gRPC | 启动时 | Agent 注册到 Job Scheduler |
+| HealthCheck | JS → Agent | HTTP | 5s | Job Scheduler 健康检查 |
+| AssignTask | JS → Agent | HTTP/gRPC | 事件驱动 | 分配采集任务 |
+| RevokeTask | JS → Agent | HTTP/gRPC | 事件驱动 | 撤销采集任务 |
+| CollectionReport | Agent → JS | HTTP/gRPC | 每次采集 | 采集结果上报（元数据，非数据本身） |
+| PushMetrics | Agent → OTel | OTLP HTTP/gRPC | 每次采集 | 采集数据推送到 OTel Collector |
+| GetCredential | Agent → CredService | HTTP | 按需 | 获取采集凭据（通过凭据引用） |
+| ReportPluginInventory | Agent → JS | HTTP/gRPC | 状态变更/30s | 上报插件清单和状态 |
 
 ### 5.4 Agent 与外部组件交互全景
 
@@ -637,15 +793,15 @@ Collector 慢（背压）：
 
 **[建议]**：方案 A。Agent 通过 credential_ref 向独立凭据服务获取凭据，凭据不经过 Job Scheduler 中转，减少暴露面。方案 C 作为降级优化。
 
-### DEC-AGENT-05：插件架构选型
+### DEC-AGENT-05：Agent 插件架构
 
 | 方案 | 描述 | 优点 | 缺点 |
 |------|------|------|------|
-| A：进程内插件 | 动态链接库 (.so/.dll) 加载 | 高性能；共享内存 | 语言绑定；崩溃影响主进程 |
-| B：子进程插件 | 独立进程通过 stdin/stdout 通信 | 隔离性好；语言无关 | IPC 开销；进程管理复杂 |
-| C：WASM 插件 | WebAssembly 沙箱执行 | 安全沙箱；跨平台 | 性能开销；WASM 生态不成熟 |
+| A：阶段 2 再实现插件 | 阶段 1 内置所有类型，阶段 2 再拆分插件 | 阶段 1 简单 | 扩展性差；新类型需要重新编译主程序 |
+| B：阶段 1 即支持插件（当前） | 核心类型内置，扩展类型作为插件热加载 | 从开始就支持扩展；插件故障隔离 | 阶段 1 开发量稍大 |
+| C：完全插件化 | 所有类型（含 Scrape/SNMP/Probe）均为插件 | 架构统一 | 核心插件也面临进程间通信开销 |
 
-**[建议]**：阶段 1 暂不实现插件架构，内置所有 Agent 类型。阶段 2 评估方案 B（子进程插件），当需要支持第三方扩展时。
+**[建议]**：方案 B（阶段 1 即支持插件）。核心采集类型（Scrape、SNMP、Probe）内置于主进程，保证基础采集的稳定性。扩展类型（Oracle、MySQL、Windows、Custom）作为子进程插件，支持热加载和故障隔离。插件故障不影响主进程和其他插件。
 
 ---
 

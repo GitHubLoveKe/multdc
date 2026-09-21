@@ -25,7 +25,7 @@ RC（RuleCheck）任务调度模块负责在具有本地存储的区（Mode B / 
 │  └──────────────┘    │  · RuleSpec → RC 任务清单                   │   │
 │                      │  · RC 槽位管理（独立/共享/节点绑定）          │   │
 │                      │  · RC 节点对等检测（RC ↔ RC）               │   │
-│                      │  · 规则包分发                               │   │
+│                      │  · 规则包分发（RC 定时拉取 + 紧急通知）           │   │
 │                      │  · RC 告警输出转发 (C4)                     │   │
 │                      └──────────────┬────────────────────────────┘   │
 │                                     │                                 │
@@ -166,10 +166,10 @@ RC（RuleCheck）任务调度模块负责在具有本地存储的区（Mode B / 
 
 | 功能项 | 描述 |
 |--------|------|
-| F-4.1 全量分发 | 规则变更时，向所有 RC 节点推送完整规则包 |
-| F-4.2 增量更新 | 大规则包支持增量 diff 更新 |
-| F-4.3 版本校验 | RC 节点定期校验规则版本一致性 |
-| F-4.4 规则热加载 | RC 节点接收新规则后热加载，无需重启 |
+| F-4.1 RC 定时拉取 | RC 周期性（默认 30s）向调度器请求最新规则包，调度器暴露 HTTP 端点供 RC 拉取 |
+| F-4.2 紧急推送通知 | 规则紧急变更时，调度器主动通知 RC 立即拉取最新规则包 |
+| F-4.3 版本校验 | RC 节点拉取规则包时携带当前版本号，调度器对比后决定是否返回更新 |
+| F-4.4 规则热加载 | RC 节点接收新规则包后写入 vmalert 规则文件目录，调用 vmalert reload API 触发热加载 |
 
 ### 3.5 告警输出
 
@@ -352,7 +352,7 @@ message RCAlert {
   string source_zone_id = 9;
   string source_rc_node_id = 10;
   
-  // 去重键（接管期间防重复）
+  // 去重键（Prometheus fingerprint = hash(alertname + sorted labels)，节点无关，接管时自然去重）
   string dedup_key = 11;
 }
 
@@ -498,6 +498,44 @@ RCManifest (1 per zone)
   - 控制面恢复后，批量补发缓冲告警
 ```
 
+#### 5.1.5 规则包拉取接口（RC → RC 任务调度）
+
+```
+接口: PullRulePackage
+方向: RC 节点 → RC 任务调度模块
+周期: 默认 30s
+协议: HTTP
+
+请求:
+  PullRulePackageRequest {
+    rc_node_id: string
+    zone_id: string
+    current_version: uint64     // 当前持有的规则包版本
+  }
+
+响应:
+  PullRulePackageResponse {
+    has_update: bool
+    rule_package: RulePackage   // 完整规则包 (has_update=true 时)
+    current_version: uint64     // 最新版本号
+    delivery_type: "full" | "incremental"
+  }
+
+处理流程:
+  1. RC 节点定时发送拉取请求
+  2. 调度器对比版本号:
+     - current_version == latest → 返回 has_update=false
+     - current_version < latest → 返回完整规则包或增量 diff
+  3. RC 节点接收新规则包后:
+     - 写入 vmalert 规则文件目录
+     - 调用 vmalert reload API 触发热加载
+  4. 返回确认
+
+紧急通知:
+  - 调度器可通过 RC 心跳通道发送 "规则变更通知"
+  - RC 收到通知后立即触发拉取（不等下一个 30s 周期）
+```
+
 ### 5.2 交互时序图
 
 #### 5.2.1 RC 规则分发与评估流程
@@ -510,24 +548,29 @@ RCManifest (1 per zone)
   │              │──RuleSpec──▶  │               │              │             │
   │              │  Delivery     │               │              │             │
   │              │               │               │              │             │
-  │              │               │──检查存储模式──▶│              │             │
-  │              │               │  (Mode B/C?)   │              │             │
+  │              │               │◀──PullRulePackage───────────│              │
+  │              │               │  (RC 定时拉取, 30s)          │              │
+  │              │               │──RulePackage────────────────▶│              │
   │              │               │               │              │             │
-  │              │               │──分发规则包───▶│              │             │
-  │              │               │──分发规则包────────────────▶│             │
+  │              │               │◀──PullRulePackage─────────────────────────│
+  │              │               │  (RC 定时拉取, 30s)                         │
+  │              │               │──RulePackage──────────────────────────────▶│
   │              │               │               │              │             │
   │              │               │               │──热加载规则──│              │
+  │              │               │               │  (vmalert     │              │
+  │              │               │               │   reload API) │              │
   │              │               │               │              │──热加载规则──│
   │              │               │               │              │             │
   │              │               │               │──查询数据──────────────────▶│
   │              │               │               │◀──返回结果─────────────────│
   │              │               │               │              │             │
   │              │               │               │──评估规则     │              │
-  │              │               │               │  (PromQL)     │              │
+  │              │               │               │  (vmalert)    │              │
   │              │               │               │              │             │
-  │              │               │◀──告警────────│              │             │
+  │              │               │               │──告警────────▶│              │
+  │              │               │               │  (Alertmanager)             │
   │              │               │               │              │             │
-  │◀──AlertBatch─│◀──────────────│               │              │             │
+  │◀──AlertBatch─│◀──────────────│◀──────────────│              │             │
   │  (C4/M3)     │               │               │              │             │
 ```
 
@@ -736,7 +779,7 @@ RC Node A       RC Node B       RC Node C      (故障: RC Node D)
   │  容量上限: 10000 条                              │
   │  淘汰策略: FIFO（最旧的先淘汰）                   │
   │  持久化: 写入本地磁盘（防 RC 重启丢失）           │
-  │  去重: dedup_key = hash(rule_id + labels)       │
+  │  去重: dedup_key = Prometheus fingerprint = hash(alertname + sorted labels) │
   │                                                │
   │  控制面恢复后:                                   │
   │    1. 批量补发缓冲告警                           │
@@ -744,6 +787,15 @@ RC Node A       RC Node B       RC Node C      (故障: RC Node D)
   │    3. 补发完成后清空缓冲区                        │
   └────────────────────────────────────────────────┘
 ```
+
+### 6.5 规则包分发模式
+
+| 方案 | 描述 | 优点 | 缺点 |
+| A：全量推送 | 规则变更时调度器主动推送到所有 RC 节点 | 实时性好 | RC 需暴露推送接口；大规则包推送开销大 |
+| B：RC 定时拉取（当前基础） | RC 周期性从调度器拉取规则包 | 简单；与 vmalert 规则文件加载兼容 | 更新延迟取决于拉取间隔 |
+| C：拉取 + 紧急通知（当前） | RC 定时拉取 + 紧急变更时调度器通知 RC 立即拉取 | 平衡实时性与简洁性 | 需要心跳通道携带通知 |
+
+**决策**: 采用方案 C。常规更新依赖 RC 定时拉取（30s 间隔），紧急变更时调度器通过心跳通道通知 RC 立即拉取。与 vmalert 的规则文件 HTTP 加载模式天然兼容。
 
 ---
 
