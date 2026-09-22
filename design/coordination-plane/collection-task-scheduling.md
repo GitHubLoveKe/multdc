@@ -1,42 +1,49 @@
-# 采集任务调度
+# 采集任务调度（协调层视角）
+
+> 版本：v2.0 | 日期：2026-09-22
+> 本文档描述协调层在采集任务调度中的职责。
+> v2.0 核心变更：协调层定位为纯数据中继，不做调度决策。调度由 Scheduler 自治完成（Rendezvous Hashing + Gossip）。
+
+---
 
 ## 一、概述
 
-采集任务调度是协调层的核心模块，负责将中心控制面定义的任务规格（TaskSpec）转化为区内可执行的采集清单（Zone Manifest），并通过槽位（Slot）机制将采集目标分配至具体的 Job Scheduler 节点与 Agent 实例执行。
+协调层在采集任务调度中的职责是**缓存控制面的实例数据，并为 Scheduler 提供高效的数据查询接口**。它不参与任何调度决策——"谁来采、在哪采、怎么采"完全由 Scheduler 自主决定。
 
-本模块是"中心管理 ≠ 中心调度"（P1）原则的直接体现：控制面定义"采什么"，协调面决定"谁来采、在哪采、怎么采"。整个调度过程在区内部闭环完成，不依赖控制面的实时参与。
+这是"中心管理 ≠ 中心调度"（P1）原则的彻底体现：控制面定义"采什么"，协调层缓存"采什么"的数据副本，Scheduler 决定"谁来采"。
 
 ### 1.1 核心定位
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      中心控制面 (Control Plane)                   │
-│  TaskSpec: 定义 target 列表、指标列表、采集间隔、Agent 类型          │
+│  实例注册表：定义 target、采集配置、凭据、启用/禁用                  │
 │  "采什么" — WHAT                                                   │
 └──────────────────────────┬──────────────────────────────────────┘
-                           │ M2 跨区通道
+                           │ PullInstanceChanges（增量拉取）
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      协调层 (Coordination Plane)                  │
 │                                                                  │
-│  ┌──────────────┐    ┌──────────────────────────────────────┐   │
-│  │  Zone Agent   │───▶│       采集任务调度 (本模块)            │   │
-│  │  (跨区代理)    │    │                                      │   │
-│  └──────────────┘    │  · Zone Manifest 生成                  │   │
-│                      │  · 槽位管理与分配                       │   │
-│                      │  · 所有权协商 (VRRP-style)              │   │
-│                      │  · Epoch Fencing                       │   │
-│                      │  · Agent 调度                          │   │
-│                      │  · Manifest 分发                       │   │
-│                      └──────────────┬───────────────────────┘   │
-│                                     │                            │
-└─────────────────────────────────────┼────────────────────────────┘
-                                      │
-                                      ▼
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              采集任务调度 — 协调层视角 (本模块)              │   │
+│  │                                                          │   │
+│  │  · 缓存实例数据（Redis 物化视图）                          │   │
+│  │  · 维护 root_hash（全局一致性指纹）                        │   │
+│  │  · 提供增量查询接口（Scheduler 按需拉取）                   │   │
+│  │  · 降级时冻结数据，不影响已有采集                           │   │
+│  │                                                          │   │
+│  │  注意：不做调度决策，不做槽位分配，不做所有权协商             │   │
+│  └──────────────────────────┬───────────────────────────────┘   │
+│                             │                                    │
+└─────────────────────────────┼────────────────────────────────────┘
+                              │ QueryInstanceData（Scheduler 查询）
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      采集层 (Data Plane)                          │
 │  Job Scheduler × N  →  Agent × M  →  OTel Collector             │
-│  "谁来采" — HOW                                                   │
+│  Scheduler 自治：Rendezvous Hashing 分配 + Gossip 拓扑同步        │
+│  "谁来采" — HOW（Scheduler 自主决定）                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -44,19 +51,18 @@
 
 | 目标编号 | 描述 | 优先级 |
 |---------|------|--------|
-| G-01 | 控制面不可达时，区内采集调度不受影响（L1 降级） | P0 |
-| G-02 | 节点故障后，其槽位在 ≤30s 内被其他节点接管 | P0 |
-| G-03 | 杜绝双主（dual-master），宁可留空也不重复采集 | P0 |
-| G-04 | Manifest 变更在 ≤5s 内传播至区内所有 Job Scheduler | P1 |
-| G-05 | 支持 1~50 个 Job Scheduler 节点的区规模 | P1 |
-| G-06 | 槽位重新平衡时对采集中断最小化 | P2 |
+| G-01 | 控制面不可达时，协调层缓存数据仍可供 Scheduler 查询（L1 降级） | P0 |
+| G-02 | Scheduler 增量拉取延迟 ≤5s（控制面有变更时） | P1 |
+| G-03 | root_hash 一致时，Scheduler 可跳过逐条比对（高效对账） | P1 |
+| G-04 | 协调层故障时，Scheduler 使用本地缓存继续运行 | P0 |
+| G-05 | 支持 1~50 个 Scheduler 节点同时查询 | P1 |
 
 ### 1.3 适用场景
 
-- 标准多 zone 监控部署，每个 zone 独立运行本调度逻辑
+- 标准多 zone 监控部署，协调层仅部署于核心网区
 - 区内含 1~50 个 Job Scheduler 节点
-- 每个节点运行 1~N 个 Agent 实例（Scrape / SNMP / Probe 类型）
-- 区规模适配：Small（1 节点）、Normal（2 节点）、Critical（≥3 节点）
+- 每个 Scheduler 独立运行 Rendezvous Hashing，不依赖协调层分配
+- 控制面不可达时，协调层冻结最后已知数据，Scheduler 使用本地缓存
 
 ---
 
@@ -66,729 +72,451 @@
 
 | 职责 | 说明 |
 |------|------|
-| Zone Manifest 生成 | 将 TaskSpec 转化为区级别的完整采集清单，包含槽位分配 |
-| 槽位管理 | 维护固定数量的 slot，管理 slot 与 target 的映射关系 |
-| 所有权协商 | VRRP-style 对等检测，节点间协商 slot 归属 |
-| Epoch Fencing | 通过复合令牌（zone_epoch + slot_version）防止脑裂 |
-| Agent 调度 | 在 owned slot 内，将采集任务分配给具体的 Agent 实例 |
-| Manifest 分发 | 确保区内每个 Job Scheduler 持有完整一致的 Manifest |
-| 采集重平衡 | 节点增减或负载不均时，触发 slot 迁移 |
+| 实例数据缓存 | 从控制面增量拉取实例数据，缓存到 Redis |
+| root_hash 维护 | 维护全局一致性指纹，供 Scheduler 快速对账 |
+| 增量查询接口 | Scheduler 按需查询变更的实例数据 |
+| 快照版本管理 | 记录每次从控制面拉取的时间戳作为 snapshot_version |
+| 降级冻结 | 控制面不可达时冻结数据，标记降级状态 |
 
 ### 2.2 本模块不负责
 
 | 不负责事项 | 归属 | 说明 |
 |-----------|------|------|
-| 定义采集目标（target） | 控制面 | 控制面通过 TaskSpec 定义"采什么" |
-| 定义采集规则（rule） | 控制面 | 控制面通过 RuleSpec 定义规则 |
-| 实际执行采集 | 采集层 Agent | Agent 是纯执行器 |
-| 数据写入与存储 | 采集层 OTel Collector / Storage | 数据管道独立于调度 |
-| 跨区通信 | Zone Agent（跨区代理） | Zone Agent 负责 M2/M3 接口 |
-| 节点注册与实例管理 | 控制面实例注册表 | 协调面只消费注册信息 |
-| 告警规则评估 | RC 任务调度模块 | RC 调度独立管理 |
+| 调度决策（实例→节点映射） | Scheduler | Rendezvous Hashing 在 Scheduler 本地执行 |
+| 拓扑感知（节点上下线） | Scheduler | Gossip 协议在 Scheduler 间运行 |
+| 健康检测 | Scheduler | 本地健康检测合并入 Scheduler（DEC-017） |
+| 冲突仲裁 | Scheduler | Gossip 收敛后冲突自动消除 |
+| 定义采集目标 | 控制面 | 控制面是"采什么"的唯一权威 |
+| 实际执行采集 | Agent | Agent 是纯执行器 |
+| 跨区通信 | Zone Agent | Zone Agent 负责 M2/M3 接口 |
 
 ### 2.3 与其他模块的协作关系
 
 ```
-                    ┌─────────────────────┐
-                    │   组件健康 (Health)   │
-                    │  节点状态变更通知      │
-                    └────────┬────────────┘
-                             │ 节点状态事件
-                             ▼
-┌──────────────┐    ┌─────────────────────┐    ┌──────────────────┐
-│  行为决策      │◀──▶│  采集任务调度 (本模块) │◀──▶│  冲突仲裁         │
-│  重平衡/驱逐   │    │                     │    │  所有权冲突解决    │
-└──────────────┘    └────────┬────────────┘    └──────────────────┘
-                             │
-                    ┌────────┴────────────┐
-                    │   RC 任务调度        │
-                    │  共享/独立槽位池      │
-                    └─────────────────────┘
+┌──────────────────┐    ┌──────────────────────┐    ┌──────────────────┐
+│  控制面            │───▶│  协调层 (本模块)       │◀───│  Job Scheduler × N │
+│  实例注册表        │    │  Redis 缓存           │    │  自治调度           │
+│  (WHAT)           │    │  数据中继              │    │  (HOW)            │
+└──────────────────┘    └──────────────────────┘    └──────────────────┘
+                               │                          │
+                               │    QueryInstanceData     │
+                               │◀─────────────────────────│
+                               │──────────────────────────▶│
+                               │    SyncResponse          │
+                               │                          │
+                               │    (Scheduler 间无协调层   │
+                               │     参与，Gossip 直连)     │
 ```
+
+**关键变化（v2.0）：**
+- 协调层不再与 Scheduler 进行"Manifest 分发"——Scheduler 主动拉取
+- 协调层不再管理槽位——Rendezvous Hashing 无需槽位
+- 协调层不再参与所有权协商——Gossip 收敛自动解决冲突
+- 协调层不再管理 Agent 调度——Scheduler 本地决定
 
 ---
 
 ## 三、功能清单
 
-### 3.1 Zone Manifest 生成
+### 3.1 控制面数据同步
 
 | 功能项 | 描述 |
 |--------|------|
-| F-1.1 TaskSpec 解析 | 接收 Zone Agent 转发的 TaskSpec，解析目标列表、指标配置、Agent 类型要求 |
-| F-1.2 槽位划分 | 根据 zone 配置的总槽位数，将 targets 均匀分配至各 slot |
-| F-1.3 初始分配 | 首次生成 Manifest 时，将 slots 均分至所有已注册 Job Scheduler 节点 |
-| F-1.4 版本管理 | 每次 Manifest 变更递增 version，确保全区一致 |
-| F-1.5 增量更新 | 支持增量 diff 模式，仅下发变更部分（目标增删、配置变更） |
+| F-1.1 增量拉取 | 定期向控制面查询 `updatetime > last_sync_time` 的变更记录 |
+| F-1.2 全量校验 | 定期（默认 60s）执行全量比对，修正增量同步可能的遗漏 |
+| F-1.3 快照版本管理 | 每次成功拉取后更新 `snapshot_version`（时间戳格式） |
+| F-1.4 root_hash 计算 | 每次数据变更后重新计算 root_hash = hash(all instance_id + updatetime pairs) |
+| F-1.5 降级检测 | 控制面连续 N 次拉取失败，标记为降级状态，冻结数据 |
+| F-1.6 恢复追赶 | 控制面恢复后，执行全量同步追上缺失的变更 |
 
-### 3.2 槽位管理
-
-| 功能项 | 描述 |
-|--------|------|
-| F-2.1 槽位容量 | 每个 slot 承载 ≤200 个 target（可配置） |
-| F-2.2 槽位总数 | zone 配置后固定，变更需全量重映射（高成本操作） |
-| F-2.3 槽位状态 | 维护每个 slot 的状态：assigned / unassigned / migrating / fenced |
-| F-2.4 Agent 类型匹配 | slot 标记所需 agent_type，确保调度到正确类型的 Agent |
-| F-2.5 槽位标签 | 支持 slot 级别的标签（如 priority、zone-affinity），用于调度策略 |
-
-### 3.3 所有权协商
+### 3.2 Scheduler 查询服务
 
 | 功能项 | 描述 |
 |--------|------|
-| F-3.1 心跳检测 | Job Scheduler 间 3s 周期心跳，VRRP-style 对等检测 |
-| F-3.2 故障检测 | 节点连续 N 次心跳未响应，标记为 SUSPECT |
-| F-3.3 接管协商 | 故障节点的 slots 由存活节点协商接管 |
-| F-3.4 Epoch 令牌 | 每次所有权变更生成新的 epoch_token，防止旧主恢复后冲突 |
-| F-3.5 多数派确认 | 接管需多数派确认，无法达成多数则留空（宁缺勿滥） |
+| F-2.1 增量查询 | Scheduler 提供 `last_updatetime`，协调层返回之后的变更 |
+| F-2.2 全量查询 | Scheduler 请求所有实例数据（首次同步或恢复时使用） |
+| F-2.3 root_hash 查询 | Scheduler 请求当前 root_hash，用于快速一致性判断 |
+| F-2.4 单实例查询 | 按 instance_id 查询完整实例数据（含凭据） |
+| F-2.5 降级标记 | 响应中标记当前是否处于降级状态 |
 
-### 3.4 Agent 调度
-
-| 功能项 | 描述 |
-|--------|------|
-| F-4.1 Agent 注册 | Job Scheduler 发现本节点上的 Agent 实例，记录其类型与能力 |
-| F-4.2 Agent 分配 | 将 slot 内的采集任务分配给匹配的 Agent |
-| F-4.3 Agent 故障重分配 | Agent 故障不影响 slot 所有权，Scheduler 重新分配给其他 Agent |
-| F-4.4 Agent 负载均衡 | 同节点多 Agent 时，按能力与负载均衡分配 |
-| F-4.5 Agent 健康联动 | 与组件健康模块联动，获取 Agent 实时状态 |
-
-### 3.5 Manifest 分发
+### 3.3 数据管理
 
 | 功能项 | 描述 |
 |--------|------|
-| F-5.1 全量推送 | Manifest 变更时，Zone Agent 向区内所有 Job Scheduler 全量推送 |
-| F-5.2 增量同步 | 大版本变更时支持增量 diff，减少传输量 |
-| F-5.3 版本校验 | 每个 Job Scheduler 定期校验自身 Manifest 版本是否为最新 |
-| F-5.4 版本回退拒绝 | 拒绝接受低于当前版本的 Manifest，防止乱序 |
-| F-5.5 离线节点追赶 | 节点恢复后，主动拉取最新 Manifest 进行同步 |
+| F-3.1 实例数据存储 | Redis Hash `instance:{id}` 存储每个实例的完整字段 |
+| F-3.2 实例索引 | Redis Set `all_instances` 存储所有 instance_id |
+| F-3.3 时间线索引 | Redis Sorted Set `instance_timeline` 按 updatetime 排序 |
+| F-3.4 数据过期 | 控制面通知实例删除时，从缓存中移除 |
+| F-3.5 数据隔离 | 不同 zone 的数据使用 Redis key 前缀隔离 |
 
 ---
 
 ## 四、核心数据模型
 
-### 4.1 ZoneManifest — 区采集清单
+### 4.1 Redis 数据结构
+
+```
+# 实例数据 — 每个实例一个 Hash
+HSET instance:{instance_id}
+  instance_id     "inst-001"
+  job_name        "mysql-prod"
+  agent_type      "scrape"
+  host            "10.0.1.5"
+  port            "3306"
+  scheme          "http"
+  metrics_path    "/metrics"
+  scrape_interval "15s"
+  auth_type       "basic"
+  username        "monitor"          # 凭据合并入实例记录（DEC-016）
+  password        "encrypted:xxx"    # 加密存储
+  enabled         "1"
+  zone_id         "zone-core"
+  updatetime      "1727000000"
+  ...
+
+# 实例索引 — 所有 instance_id 的集合
+SADD all_instances "inst-001" "inst-002" ...
+
+# 时间线索引 — 按 updatetime 排序，支持增量查询
+ZADD instance_timeline 1727000000 "inst-001"
+ZADD instance_timeline 1727000005 "inst-002"
+
+# 全局一致性指纹
+SET root_hash "sha256:a1b2c3d4..."
+SET snapshot_version "1727000100"
+
+# 降级状态
+SET degradation_status "normal" | "degraded"
+SET last_control_plane_sync "1727000100"
+```
+
+### 4.2 InstanceRecord — 实例记录（Protobuf）
 
 ```protobuf
-// ZoneManifest 是协调层的核心数据结构
-// 每个 Job Scheduler 节点持有完整的一份，但 owner_node 字段各节点视角不同
-message ZoneManifest {
-  // 区标识
-  string zone_id = 1;
-  
-  // Manifest 版本号，单调递增
-  // 每次 TaskSpec 变更、slot 重分配、节点增减均递增
-  uint64 version = 2;
-  
-  // 区纪元号
-  // 仅在区拓扑发生根本性变化时递增（如 zone 重建）
-  // 用于 epoch fencing 的高位部分
-  uint64 epoch = 3;
-  
-  // 槽位分配列表
-  repeated SlotAssignment slots = 4;
-  
-  // 已注册的 Agent 列表
-  repeated AgentRegistration agents = 5;
-  
-  // 生成时间戳
-  google.protobuf.Timestamp created_at = 6;
-  
-  // 来源标识：哪个控制面实例生成
-  string source_control_plane_id = 7;
+// InstanceRecord 是协调层缓存的核心数据结构
+// 四层属性模型（DEC-016 凭据合并入实例记录）
+message InstanceRecord {
+  // === 身份层（极少变更）===
+  string instance_id = 1;         // 全局唯一实例标识
+  string job_name = 2;            // 所属 Job 名称
+  string agent_type = 3;          // 所需 Agent 类型: scrape / snmp / probe
+
+  // === 连接层（可能变更）===
+  string host = 4;                // 目标地址（IP 或域名）
+  int32 port = 5;                 // 目标端口
+  string scheme = 6;              // 协议: http / https
+
+  // === 配置层（偶尔变更）===
+  string metrics_path = 7;        // 指标路径，默认 "/metrics"
+  string scrape_interval = 8;     // 采集间隔，如 "15s", "30s"
+  string auth_type = 9;           // 认证类型: none / basic / bearer / tls
+
+  // === 凭据层（独立生命周期，合并入实例记录）===
+  string username = 10;           // 认证用户名（basic auth）
+  string password = 11;           // 认证密码（加密存储）
+  string bearer_token = 12;       // Bearer Token
+  string tls_cert = 13;           // TLS 客户端证书
+
+  // === 管理元数据 ===
+  bool enabled = 14;              // 管理启用/禁用（协调层视角）
+  string zone_id = 15;            // 所属网区
+  int64 updatetime = 16;          // 最后更新时间戳（变更检测用）
+  map<string, string> labels = 17; // 附加标签
 }
 ```
 
-### 4.2 SlotAssignment — 槽位分配
+### 4.3 SyncRequest / SyncResponse — 同步协议
 
 ```protobuf
-message SlotAssignment {
-  // 槽位 ID，区内唯一
-  // 范围 [0, total_slot_count)
-  uint32 slot_id = 1;
-  
-  // 该槽位负责的采集目标列表
-  repeated Target targets = 2;
-  
-  // 当前所有者节点 ID
-  // 对应 Job Scheduler 的 node_id
-  // 为空表示该 slot 当前无主（unassigned）
-  string owner_node = 3;
-  
-  // Epoch 令牌，复合结构
-  // 格式: "{zone_epoch}-{slot_version}"
-  // 例: "3-42" 表示 zone_epoch=3, 该 slot 第 42 次所有权变更
-  string epoch_token = 4;
-  
-  // 所需 Agent 类型
-  // 如: "scrape" | "snmp" | "probe" | "mixed"
-  string agent_type = 5;
-  
-  // 槽位状态
-  SlotState state = 6;
-  
-  // 槽位标签
-  map<string, string> labels = 7;
-  
-  // 目标数量（冗余字段，便于快速判断容量）
-  uint32 target_count = 8;
+// Scheduler → 协调层 的查询请求
+message SyncRequest {
+  string scheduler_id = 1;         // 请求方 Scheduler 标识
+  string zone_id = 2;              // 查询的网区
+
+  // 查询模式
+  oneof query {
+    IncrementalQuery incremental = 3;  // 增量查询
+    FullQuery full = 4;                // 全量查询
+    HashQuery hash = 5;                // 仅查询 root_hash
+  }
 }
 
-enum SlotState {
-  SLOT_STATE_UNSPECIFIED = 0;
-  SLOT_STATE_ASSIGNED = 1;     // 正常分配，有明确 owner
-  SLOT_STATE_UNASSIGNED = 2;   // 无主，等待分配
-  SLOT_STATE_MIGRATING = 3;    // 迁移中，from_node → to_node
-  SLOT_STATE_FENCED = 4;       // 被隔离，不参与调度
+message IncrementalQuery {
+  int64 since_updatetime = 1;      // 返回该时间之后的变更
 }
-```
 
-### 4.3 Target — 采集目标
+message FullQuery {
+  // 无额外参数，返回所有实例数据
+}
 
-```protobuf
-message Target {
-  // 实例 ID，全局唯一
-  // 对应控制面实例注册表中的 instance_id
-  string instance_id = 1;
-  
-  // 采集端点
-  // 如: "http://10.0.1.5:9100/metrics"
-  string endpoint = 2;
-  
-  // 采集间隔
-  // 如: "15s", "30s", "1m"
-  google.protobuf.Duration scrape_interval = 3;
-  
-  // 指标路径
-  // 默认: "/metrics"
-  string metrics_path = 4;
-  
-  // 凭证引用 ID
-  // 注意：这里只存引用，不存实际凭证
-  // 实际凭证由 Agent 通过安全通道从凭证服务获取
-  string credential_id = 5;
-  
-  // 附加标签
-  // 会附加到采集到的指标上
-  map<string, string> labels = 6;
-  
-  // 超时时间
-  google.protobuf.Duration scrape_timeout = 7;
-  
-  // 是否启用
-  bool enabled = 8;
+message HashQuery {
+  // 无额外参数，返回 root_hash 和 snapshot_version
+}
+
+// 协调层 → Scheduler 的响应
+message SyncResponse {
+  bool is_degraded = 1;            // 是否处于降级状态
+  int64 snapshot_version = 2;      // 当前快照版本
+  string root_hash = 3;            // 全局一致性指纹
+
+  // 实例数据列表（hash 查询时为空）
+  repeated InstanceRecord instances = 4;
+
+  // 变更类型标记（增量查询时有效）
+  repeated ChangeType change_types = 5;  // 与 instances 一一对应
+
+  enum ChangeType {
+    CHANGE_TYPE_UNSPECIFIED = 0;
+    CHANGE_TYPE_CREATE = 1;
+    CHANGE_TYPE_UPDATE = 2;
+    CHANGE_TYPE_DELETE = 3;
+  }
 }
 ```
 
-### 4.4 AgentRegistration — Agent 注册
-
-```protobuf
-message AgentRegistration {
-  // Agent 实例 ID
-  string agent_id = 1;
-  
-  // 所在节点 ID
-  string node_id = 2;
-  
-  // Agent 类型
-  AgentType agent_type = 3;
-  
-  // Agent 状态
-  AgentState state = 4;
-  
-  // 当前负载（已分配的 target 数量）
-  uint32 current_load = 5;
-  
-  // 最大容量
-  uint32 max_capacity = 6;
-  
-  // 支持的能力列表
-  repeated string capabilities = 7;
-  
-  // 最后心跳时间
-  google.protobuf.Timestamp last_heartbeat = 8;
-}
-
-enum AgentType {
-  AGENT_TYPE_UNSPECIFIED = 0;
-  AGENT_TYPE_SCRAPE = 1;    // Prometheus 风格 HTTP 采集
-  AGENT_TYPE_SNMP = 2;      // SNMP 采集
-  AGENT_TYPE_PROBE = 3;     // 主动探测（Blackbox 风格）
-  AGENT_TYPE_MIXED = 4;     // 多类型混合
-}
-
-enum AgentState {
-  AGENT_STATE_UNSPECIFIED = 0;
-  AGENT_STATE_ACTIVE = 1;
-  AGENT_STATE_DRAINING = 2;
-  AGENT_STATE_OFFLINE = 3;
-  AGENT_STATE_ERROR = 4;
-}
-```
-
-### 4.5 辅助数据结构
-
-```protobuf
-// 节点视角的槽位所有权映射
-// 每个 Job Scheduler 维护自己视角的 OwnershipView
-message OwnershipView {
-  string my_node_id = 1;
-  uint64 manifest_version = 2;
-  
-  // 本节点拥有的 slot 列表
-  repeated uint32 owned_slots = 3;
-  
-  // 本节点各 slot 的 epoch_token
-  map<uint32, string> slot_epoch_tokens = 4;
-  
-  // 已知的其他节点所有权视图（用于冲突检测）
-  map<string, NodeOwnershipClaim> peer_claims = 5;
-}
-
-message NodeOwnershipClaim {
-  string node_id = 1;
-  repeated uint32 claimed_slots = 2;
-  uint64 claim_version = 3;      // 声称的版本号
-  google.protobuf.Timestamp claim_time = 4;
-}
-
-// 槽位容量配置
-message SlotConfig {
-  string zone_id = 1;
-  uint32 total_slots = 2;         // 总槽位数
-  uint32 max_targets_per_slot = 3; // 每槽最大 target 数，默认 200
-  uint32 rebalance_threshold = 4;  // 重平衡触发阈值（偏差百分比）
-}
-```
-
-### 4.6 数据模型关系图
+### 4.4 数据模型关系图
 
 ```
-ZoneManifest (1)
-  ├── SlotAssignment (N)
-  │     ├── Target (M)         // 每个 slot 包含多个 target
-  │     └── labels, state      // slot 元数据
-  ├── AgentRegistration (K)
-  │     └── capabilities       // Agent 能力声明
-  └── OwnershipView (per node)
-        ├── owned_slots         // 本节点视角
-        └── peer_claims         // 其他节点声称
+Redis 数据结构:
 
-关键约束:
-  - sum(slot.target_count) == total targets in TaskSpec
-  - total_slots 在 zone 创建后固定
-  - 每个 slot 最多 1 个 owner_node（非 MIGRATING 状态时）
-  - owner_node 为空的 slot 数量应最小化
+  instance:{id}  (Hash × N)
+    ├── 身份层: instance_id, job_name, agent_type
+    ├── 连接层: host, port, scheme
+    ├── 配置层: metrics_path, scrape_interval, auth_type
+    ├── 凭据层: username, password, bearer_token, tls_cert
+    └── 元数据: enabled, zone_id, updatetime, labels
+
+  all_instances  (Set)
+    └── 所有 instance_id 的集合
+
+  instance_timeline  (Sorted Set)
+    └── score = updatetime, member = instance_id
+        用于增量查询: ZRANGEBYSCORE instance_timeline {since} +inf
+
+  root_hash  (String)
+    └── sha256(all instance_id + updatetime pairs)
+        Scheduler 用于快速一致性判断
+
+  snapshot_version  (String)
+    └── 最后一次从控制面成功拉取的时间戳
 ```
 
 ---
 
 ## 五、接口与交互
 
-### 5.1 内部接口（区内部件通信）
+### 5.1 控制面 → 协调层
 
-#### 5.1.1 Manifest 接收接口（Zone Agent → 采集任务调度）
+#### 5.1.1 PullInstanceChanges（增量拉取）
 
 ```
-接口: OnManifestReceived
-方向: Zone Agent → 采集任务调度模块
-触发: Zone Agent 从控制面接收到新的 TaskSpec/Manifest
-协议: 区内 gRPC
+接口: PullInstanceChanges
+方向: 协调层 → 控制面（主动拉取）
+周期: 10s（正常）/ 30s（降级模式）
+协议: gRPC (M2 接口)
 
 请求:
-  ManifestDelivery {
+  PullRequest {
     zone_id: string
-    manifest: ZoneManifest
-    delivery_type: "full" | "incremental"
-    delta: ManifestDelta (仅 incremental 时有效)
+    since_updatetime: int64    // 上次同步的时间戳
+  }
+
+响应:
+  PullResponse {
+    repeated InstanceRecord changes    // 变更的实例列表
+    int64 latest_updatetime            // 最新的 updatetime
+    bool has_more                      // 是否还有更多（分页）
   }
 
 处理流程:
-  1. 校验 manifest.version > current_version（拒绝旧版本）
-  2. 若 delivery_type == "full"：替换本地 Manifest
-  3. 若 delivery_type == "incremental"：应用 delta 到本地 Manifest
-  4. 重新计算本地节点的 slot 分配
-  5. 触发 Agent 重调度
-  6. 返回确认（含新 version）
+  1. 协调层定时向控制面发送 PullRequest
+  2. 控制面返回 updatetime > since_updatetime 的所有变更
+  3. 协调层更新 Redis 中的实例数据
+  4. 重新计算 root_hash
+  5. 更新 snapshot_version
+  6. 若 has_more = true，继续拉取直到追平
 ```
 
-#### 5.1.2 所有权协商接口（Job Scheduler ↔ Job Scheduler）
+#### 5.1.2 FullReconcile（全量校验）
 
 ```
-接口: NegotiateOwnership
-方向: Job Scheduler 节点间对等通信
-触发: 心跳超时检测到节点疑似故障 / 节点恢复后重新声明所有权
-协议: VRRP-style 多播 / 单播 gRPC
+接口: FullReconcile
+方向: 协调层 → 控制面
+周期: 60s
+协议: gRPC
 
-请求 (OwnershipClaim):
-  node_id: string
-  claimed_slots: [uint32]
-  epoch_token: string
-  claim_version: uint64
-  timestamp: Timestamp
-
-响应 (OwnershipResponse):
-  accepted: bool
-  conflicting_slots: [uint32]    // 如有冲突
-  counter_claim: OwnershipClaim  // 反声称
-
-协商流程:
-  1. 节点 A 检测到节点 B 心跳超时
-  2. 节点 A 发起 OwnershipClaim，声明接管 B 的 slots
-  3. 其他存活节点验证 claim：
-     a. 检查自身是否也声称同一 slots
-     b. 比较 epoch_token（高者优先）
-     c. epoch 相同则比较 node_id（字典序大者优先）
-  4. 多数派同意后，claim 生效
-  5. 无法达成多数派 → slots 留空（不分配）
+处理流程:
+  1. 协调层从控制面拉取所有实例数据
+  2. 与本地 Redis 数据逐条比对
+  3. 修正差异（新增、更新、删除）
+  4. 重新计算 root_hash
+  5. 记录校验日志
 ```
 
-#### 5.1.3 Agent 调度接口（采集任务调度 → Agent）
+### 5.2 Scheduler → 协调层
+
+#### 5.2.1 QueryInstanceData（实例数据查询）
 
 ```
-接口: AssignSlot
-方向: Job Scheduler → 本地 Agent
-触发: slot 分配变更 / Agent 注册 / Agent 故障恢复
+接口: QueryInstanceData
+方向: Scheduler → 协调层
+协议: gRPC
+触发: Scheduler 启动 / 定期同步 / root_hash 不一致时
 
-请求 (SlotAssignment):
-  slot_id: uint32
-  targets: [Target]
-  epoch_token: string
-  agent_type: string
-  execution_config: {
-    scrape_timeout: duration
-    honor_labels: bool
-    sample_limit: uint32
-  }
+请求: SyncRequest (见 4.3)
+响应: SyncResponse (见 4.3)
 
-响应 (AssignmentAck):
-  agent_id: string
-  accepted: bool
-  error: string (if not accepted)
-
-执行流程:
-  1. Job Scheduler 将 slot 内的 targets 分配给匹配的 Agent
-  2. Agent 确认接受后开始执行采集
-  3. Agent 按 target.endpoint 周期采集
-  4. 采集数据写入本地 OTel Collector
-```
-
-#### 5.1.4 心跳接口（Job Scheduler ↔ Job Scheduler）
-
-```
-接口: Heartbeat
-方向: Job Scheduler 节点间对等
-周期: 3s
-协议: UDP 多播 / gRPC 单播
-
-请求 (HeartbeatMessage):
-  node_id: string
-  timestamp: Timestamp
-  status: "alive" | "degraded"
-  owned_slots: [uint32]          // 当前拥有的 slots
-  slot_epoch_tokens: {uint32: string}  // slot → epoch_token 映射
-  load_info: {
-    cpu_usage: float
-    memory_usage: float
-    active_targets: uint32
-  }
-
-处理:
-  1. 收到心跳 → 重置该节点的超时计时器
-  2. 连续 3 次（默认）未收到 → 标记节点为 SUSPECT
-  3. 连续 5 次（默认）未收到 → 标记节点为 EXPIRED，触发接管流程
-  4. 检查 peer 声明的 owned_slots 与本地记录是否一致
-     不一致 → 触发冲突仲裁
-```
-
-### 5.2 外部接口（跨层/跨区通信）
-
-#### 5.2.1 控制面接口（M2）
-
-```
-接口: ControlPlaneManifestSync
-方向: 控制面 → Zone Agent → 采集任务调度
-协议: 跨区 gRPC (M2 接口)
-
-说明:
-  - Zone Agent 通过 M2 接口从控制面拉取最新 TaskSpec
-  - 拉取周期: 10s（正常）/ 30s（降级模式 L1）
-  - 控制面推送变更通知（push notification），Zone Agent 主动拉取
-  - 采集任务调度模块不直接与控制面通信，通过 Zone Agent 中转
-
-降级行为:
-  - L1（控制面不可达）: Zone Agent 停止拉取，区内使用最后已知 Manifest
-  - 采集调度不受影响，仅冻结任务定义变更
-```
-
-#### 5.2.2 健康上报接口
-
-```
-接口: ReportSchedulingHealth
-方向: 采集任务调度 → 组件健康模块
-周期: 10s
-
-上报内容:
-  SchedulingHealth {
-    zone_id: string
-    total_slots: uint32
-    assigned_slots: uint32
-    unassigned_slots: uint32
-    migrating_slots: uint32
-    node_slot_distribution: {string: uint32}  // node_id → slot_count
-    last_manifest_version: uint64
-    last_manifest_sync_time: Timestamp
-    pending_ownership_claims: uint32
-    agent_utilization: {string: float}  // agent_id → utilization_ratio
-  }
+典型使用模式:
+  1. Scheduler 先请求 root_hash（HashQuery）
+  2. 与本地 root_hash 比较
+  3. 相同 → 跳过，无需拉取
+  4. 不同 → 发送增量查询（IncrementalQuery）
+  5. 若增量查询结果仍不一致 → 发送全量查询（FullQuery）
 ```
 
 ### 5.3 交互时序图
 
-#### 5.3.1 Manifest 生成与分发流程
+#### 5.3.1 正常增量同步
 
 ```
-控制面          Zone Agent          采集任务调度          Job Scheduler × N
-  │                │                    │                      │
-  │──TaskSpec──▶   │                    │                      │
-  │  (M2 push)     │                    │                      │
-  │                │──ManifestDelivery─▶│                      │
-  │                │                    │                      │
-  │                │                    │──生成 ZoneManifest──▶│
-  │                │                    │  (slot 划分, 初始分配) │
-  │                │                    │                      │
-  │                │                    │──Broadcast Manifest─▶│
-  │                │                    │                      │
-  │                │                    │◀──────Ack(version)───│
-  │                │                    │                      │
-  │                │                    │──AssignSlot──────────▶│
-  │                │                    │  (每个节点收到自己的    │
-  │                │                    │   slot 分配)          │
-  │                │                    │                      │
-  │                │                    │◀──────AssignmentAck───│
-  │                │                    │                      │
+控制面              协调层 (Redis)           Scheduler A         Scheduler B
+  │                    │                       │                    │
+  │                    │                       │                    │
+  │◀─PullInstanceChanges─│                    │                    │
+  │  (since=1000)      │                       │                    │
+  │──changes(3 items)─▶│                       │                    │
+  │                    │──更新 Redis──────       │                    │
+  │                    │  HSET instance:{id}    │                    │
+  │                    │  root_hash = "abc"     │                    │
+  │                    │  snapshot_version=1010 │                    │
+  │                    │                       │                    │
+  │                    │◀────QueryInstanceData──│                    │
+  │                    │      (HashQuery)       │                    │
+  │                    │──root_hash="abc"──────▶│                    │
+  │                    │                       │                    │
+  │                    │  [hash 不同，需要拉取]  │                    │
+  │                    │                       │                    │
+  │                    │◀────QueryInstanceData──│                    │
+  │                    │  (IncrementalQuery     │                    │
+  │                    │   since=1000)          │                    │
+  │                    │──3 changes────────────▶│                    │
+  │                    │                       │                    │
+  │                    │                       │  [本地更新]          │
+  │                    │                       │  [Rendezvous Hash] │
+  │                    │                       │  [重新计算分配]      │
+  │                    │                       │                    │
+  │                    │◀─────────────────────────────QueryInstanceData──│
+  │                    │      (HashQuery)       │                    │
+  │                    │──root_hash="abc"──────────────────────────────│
+  │                    │                       │                    │
 ```
 
-#### 5.3.2 节点故障与接管流程
+#### 5.3.2 控制面不可达 — 降级模式
 
 ```
-Job Scheduler A    Job Scheduler B    Job Scheduler C    (故障节点 D)
-  │                  │                  │                    │
-  │◀──Heartbeat(3s)─▶│◀──Heartbeat──▶  │                    │
-  │                  │                  │                    │
-  │   [D 心跳超时 ×3] │                  │                    │
-  │                  │                  │                    │
-  │──OwnershipClaim──▶│                  │                    │
-  │  "我接管 D 的     │                  │                    │
-  │   slots [5,6,7]" │                  │                    │
-  │                  │                  │                    │
-  │◀─OwnershipResp───│                  │                    │
-  │  "同意, 无冲突"   │                  │                    │
-  │                  │                  │                    │
-  │──OwnershipClaim──────────────────▶  │                    │
-  │                                    │                    │
-  │◀─OwnershipResp─────────────────────│                    │
-  │  "同意"           │                  │                    │
-  │                  │                  │                    │
-  │  [多数派确认: A+B+C = 3/3]          │                    │
-  │  [更新 epoch_token: "3-42"→"3-43"] │                    │
-  │  [重新分配 Agent]  │                  │                    │
-  │                  │                  │                    │
+控制面              协调层 (Redis)           Scheduler A
+  │                    │                       │
+  │  [网络中断]         │                       │
+  │                    │                       │
+  │◀─PullInstanceChanges─│ (超时)               │
+  │  ... 重试失败 ...    │                       │
+  │                    │                       │
+  │                    │──标记降级状态           │
+  │                    │  degradation_status     │
+  │                    │  = "degraded"          │
+  │                    │                       │
+  │                    │◀────QueryInstanceData──│
+  │                    │──root_hash="abc"──────▶│
+  │                    │  is_degraded=true      │
+  │                    │                       │
+  │                    │  [Scheduler 知道数据    │
+  │                    │   可能不是最新，但继续   │
+  │                    │   使用缓存数据运行]     │
+  │                    │                       │
+  │                    │  [数据冻结，不再变更]    │
+  │                    │  [Scheduler 本地缓存    │
+  │                    │   仍可独立运行]         │
 ```
 
 ---
 
 ## 六、设计决策与替代方案
 
-### 6.1 槽位分配策略
+### 6.1 协调层定位
 
-#### 当前方案：均等分配（Equal Distribution）
+#### 当前方案：纯数据中继
 
-```
-总槽位数 = 100, 节点数 = 3
+协调层仅缓存控制面数据，为 Scheduler 提供查询接口。不做任何调度决策。
 
-节点 A: slots [0..32]   → 33 slots
-节点 B: slots [33..65]  → 33 slots
-节点 C: slots [66..99]  → 34 slots
+**优点：**
+- 协调层故障不影响调度——Scheduler 使用本地缓存
+- 实现简单——无需复杂的分布式状态管理
+- 符合 P1 原则——管理在中心，调度在区内
 
-算法: slot_count[i] = total_slots / N + (i < total_slots % N ? 1 : 0)
-```
+**缺点：**
+- 无法做全局最优调度——协调层不参与分配决策
+- Scheduler 需要自行维护一致性——通过 Gossip 实现
 
-**优点:**
-- 实现简单，负载均衡天然达成
-- 节点增减时只需迁移少量 slots
-- 可预测性强
+#### 替代方案：智能协调（v1.0 方案，已废弃）
 
-**缺点:**
-- 未考虑节点异构性（CPU/内存差异）
-- 未考虑 target 异构性（某些 target 采集代价更高）
+协调层生成 Zone Manifest、管理槽位、执行 VRRP 所有权协商、Epoch Fencing。
 
-#### 替代方案：加权分配（Weighted Distribution）
+**废弃原因：**
+- 协调层成为调度瓶颈和单点故障
+- 槽位模型复杂度高（DEC-014 废弃）
+- VRRP 在 2 节点场景有问题
+- 与 Scheduler 自治原则冲突
 
-```
-节点权重基于: w[i] = f(cpu, memory, network_bandwidth)
-slot_count[i] = total_slots × w[i] / sum(w)
+### 6.2 缓存策略
 
-示例:
-  节点 A (8C16G): weight=2.0 → 50 slots
-  节点 B (4C8G):  weight=1.0 → 25 slots
-  节点 C (4C8G):  weight=1.0 → 25 slots
-```
+#### 当前方案：Redis 物化视图
 
-**评估:** 作为未来迭代方向。当前阶段所有 Job Scheduler 节点假定同构，均等分配足够。加权分配增加了复杂度（权重计算、动态调整），需在实测中验证收益。
+使用 Redis 作为控制面数据的缓存层，支持增量查询和 root_hash 快速比对。
 
-**决策:** 当前采用均等分配，预留加权分配扩展点（SlotConfig 中可加入 weight 字段）。
+**优点：**
+- root_hash 比对使得一致时零开销
+- Redis 查询性能优异，支持 50+ Scheduler 并发查询
+- 增量查询减少网络传输
 
-### 6.2 对等检测协议
+**缺点：**
+- 引入 Redis 依赖
+- 缓存与控制面可能短暂不一致
 
-#### 当前方案：VRRP-style 心跳
+#### 替代方案：直连控制面
 
-```
-                    ┌──────────────────────────┐
-                    │   VRRP-style 心跳检测      │
-                    │                          │
-                    │  · 3s 周期多播/单播心跳     │
-                    │  · 3 次超时 → SUSPECT      │
-                    │  · 5 次超时 → EXPIRED      │
-                    │  · 多数派确认后接管         │
-                    │  · Epoch Fencing 防脑裂    │
-                    └──────────────────────────┘
-```
+Scheduler 直接从控制面拉取数据，无需协调层缓存。
 
-**优点:**
-- 成熟稳定，VRRP 在负载均衡领域广泛验证
-- 检测速度快（3s 周期，9s 内发现故障）
-- 去中心化，无额外依赖
-- 与 Job Scheduler 的分布式特性一致
+**评估：**
+- 减少一层缓存，但增加控制面负载
+- 跨区网络不稳定时，Scheduler 无法获取数据
+- 协调层缓存提供了降级缓冲
 
-**缺点:**
-- 2 节点场景无法达成多数派（需额外机制）
-- 心跳风暴：大规模集群中多播心跳可能拥塞
-
-#### 替代方案 A：Raft-based 检测
+### 6.3 root_hash 设计
 
 ```
-引入 Raft 共识组:
-  - 所有 Job Scheduler 参与 Raft 选举
-  - Leader 负责所有权分配
-  - 节点故障通过 Raft term 变更检测
+root_hash 计算方式:
 
-评估:
-  + 天然解决 2 节点问题（可通过 pre-vote 扩展）
-  + 强一致性保证
-  - 引入 Leader 概念，与 P3（分布式检测）原则冲突
-  - Job Scheduler 数量可能很多（50+），Raft 规模过大
-  - 增加实现复杂度
-```
+  1. 收集所有 (instance_id, updatetime) 对
+  2. 按 instance_id 字典序排序
+  3. 拼接为 "instance_id:updatetime\n" 格式
+  4. 计算 SHA-256
 
-#### 替代方案 B：Gossip 协议
+  用途:
+    - Scheduler 定期比对 root_hash
+    - 相同 → 无需拉取（快速路径）
+    - 不同 → 增量拉取变更
 
-```
-去中心化 Gossip:
-  - 每个节点随机选择 2~3 个 peer 传播状态
-  - O(log N) 轮传播至全集群
-  - 最终一致性模型
-
-评估:
-  + 大规模场景效率更高
-  + 网络容忍度好
-  - 收敛时间不确定（对小规模场景反而不如直接心跳）
-  - 所有权协商需要强一致性，gossip 的最终一致性不够
-```
-
-**决策:** 当前采用 VRRP-style，适合 1~50 节点规模。若未来区规模超过 50 节点，考虑引入分层 gossip。
-
-### 6.3 Manifest 更新策略
-
-#### 当前方案：全量推送 + 增量可选
-
-```
-正常流程:
-  控制面 TaskSpec 变更 → 生成新 Manifest → 全量推送至 Zone Agent
-  Zone Agent → 全量广播至区内所有 Job Scheduler
-
-增量模式（大 Manifest 优化）:
-  控制面计算 diff → 仅发送变更部分
-  Job Scheduler 本地应用 diff
-
-触发条件:
-  - Manifest 大小 > 1MB 时自动启用增量模式
-  - 或控制面显式指定 delivery_type = "incremental"
-```
-
-#### 替代方案：纯增量 Diff
-
-```
-始终使用增量 diff:
-  - 首次同步仍为全量
-  - 后续所有变更均为 diff
-  - 每个 Job Scheduler 维护完整 Manifest 状态
-
-评估:
-  + 减少网络传输量
-  - diff 丢失会导致状态不一致
-  - 需要额外的全量校验机制（定期 full reconcile）
-  - 实现复杂度高
-```
-
-**决策:** 全量推送为主，增量可选。简单可靠优先。定期（每 60s）进行一次全量校验确保一致性。
-
-### 6.4 Epoch Fencing 机制
-
-```
-Epoch Token 结构:
-  ┌─────────────────┬─────────────────┐
-  │   zone_epoch     │  slot_version    │
-  │   (uint32)       │  (uint32)        │
-  │   高位            │  低位            │
-  └─────────────────┴─────────────────┘
-
-  zone_epoch:   区级别纪元，仅在区拓扑根本变化时递增
-  slot_version: 槽位级别版本，每次所有权变更递增
-
-比较规则:
-  1. zone_epoch 大者胜
-  2. zone_epoch 相同，slot_version 大者胜
-  3. 完全相同，node_id 字典序大者胜
-
-Fencing 语义:
-  - 旧主恢复后，携带旧 epoch_token 尝试参与
-  - 新主拒绝旧 epoch_token，强制旧主重新注册
-  - 确保任何时刻，一个 slot 最多一个有效 owner
+  更新频率:
+    - 每次从控制面成功拉取后重新计算
+    - 约每 10s 一次（正常同步周期）
 ```
 
 ---
 
-## 七、冲突与开放问题
+## 七、开放问题
 
-### 7.1 已识别冲突
-
-| 冲突编号 | 描述 | 影响范围 | 当前状态 |
+| 问题编号 | 问题 | 候选方案 | 当前倾向 |
 |---------|------|---------|---------|
-| CS-01 | 槽位总数固定，变更成本高 | 全区 | 需设计在线变更方案或明确"不可变"约束 |
-| CS-02 | 2 节点区无法达成多数派 | Normal 规模区 | 依赖冲突仲裁模块的 2 节点方案 |
-| CS-03 | VRRP 多播在部分云网络中受限 | 网络配置 | 需确认是否回退为单播心跳 |
-| CS-04 | Agent 故障与 slot 所有权的解耦边界 | Agent 调度 | Agent 全部故障时 slot owner 是否应释放 |
-
-### 7.2 开放问题
-
-| 问题编号 | 问题 | 候选方案 | 建议 |
-|---------|------|---------|------|
-| OQ-01 | 槽位总数如何确定？ | (a) 基于预估 target 数量自动计算 (b) 管理员手动配置 (c) 基于节点数 × 每节点容量 | 建议 (a)+(b)：自动计算 + 手动覆盖 |
-| OQ-02 | Manifest 大小上限？ | (a) 无上限 (b) 10MB 硬限制 (c) 按节点数动态调整 | 建议 (b)，超出时分片 |
-| OQ-03 | 心跳协议是否支持 TLS？ | (a) 明文 (b) mTLS (c) 可选 TLS | 建议 (c)，默认 mTLS，开发环境可关闭 |
-| OQ-04 | slot 迁移期间采集是否中断？ | (a) 允许短暂重叠（≤1 scrape interval） (b) 严格不中断（先建后拆） | 建议 (a)，短暂重叠代价低 |
-| OQ-05 | 如何检测"僵尸"slot（owner 已死但未触发接管）？ | (a) 心跳超时自动检测 (b) 定期全量扫描 (c) 两者结合 | 建议 (c) |
-
-### 7.3 风险项
-
-| 风险编号 | 风险描述 | 概率 | 影响 | 缓解措施 |
-|---------|---------|------|------|---------|
-| R-01 | 心跳网络分区导致误判节点故障 | 中 | 高 | 三源交叉验证（主动探测 + 自报告 + 对等报告） |
-| R-02 | Manifest 全量推送在大 zone 中造成网络压力 | 低 | 中 | 增量 diff + 分片推送 |
-| R-03 | Epoch token 溢出（极端长期运行） | 极低 | 低 | uint32 上限 42 亿，足够 |
-| R-04 | 所有 Job Scheduler 同时重启 | 极低 | 高 | Manifest 持久化到本地磁盘，重启后恢复 |
-
-### 7.4 待决设计点
-
-1. **槽位容量硬限制 vs 软限制**: 200 targets/slot 是硬限制还是软限制？建议硬限制，但留出配置空间。
-2. **Manifest 签名机制**: 是否需要控制面对 Manifest 进行签名，防止篡改？当前假设区内通信可信。
-3. **Agent 类型扩展**: 未来新增 Agent 类型时，slot 的 agent_type 字段是否需要支持多类型？当前用 "mixed" 覆盖。
-4. **跨区 slot 迁移**: 是否支持将 slot 从一个区迁移到另一个区？当前设计不支持，slot 是区内概念。
+| OQ-01 | Redis 集群 vs 单实例？ | (a) 单实例 (b) Redis Cluster (c) Redis Sentinel | 阶段 1 单实例，阶段 3 评估集群 |
+| OQ-02 | 大规模实例（10 万+）下 root_hash 计算性能？ | (a) 每次全量计算 (b) 增量更新 hash (c) 分片 hash | 建议 (b) 增量更新 |
+| OQ-03 | 多 zone 数据隔离策略？ | (a) Redis key 前缀 (b) 独立 Redis 实例 (c) Redis DB 隔离 | 建议 (a)，key 前缀 `zone:{id}:` |

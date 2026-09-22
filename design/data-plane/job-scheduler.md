@@ -1,29 +1,33 @@
 # Job Scheduler 作业调度器
 
-> 版本：v1.0 | 日期：2026-09-21
+> 版本：v2.0 | 日期：2026-09-22
 > 状态：设计中
+> v2.0 核心变更：废弃 Slot 模型 + VRRP，改用 Rendezvous Hashing + Gossip 协议。Scheduler 完全自治，不依赖协调层做调度决策。合并健康检测（K3 → D1）。新增代理服务。
 
 ---
 
 ## 一、概述
 
-Job Scheduler 是采集层（Data Plane）在每个网区节点上的核心调度组件。它是该区节点的「大脑」，负责持有完整的 Zone Manifest、与同级节点进行 peer 检测、协商 slot 归属、调度本地 Agent 执行采集任务，并向协调层和控制面上报状态。
+Job Scheduler 是采集层（Data Plane）在每个网区节点上的核心调度组件。它是该区节点的「大脑」，负责**自主决定**本节点应采集哪些实例、将任务分配给本地 Agent 执行，并通过 Gossip 协议与同级节点同步拓扑视图。
 
-每个网区部署 N 个 Job Scheduler 节点（N >= 1），它们持有相同的 Zone Manifest 视图，但各自拥有不同的 slot 子集。节点之间通过 VRRP 风格的 peer 检测协议感知彼此状态，通过 epoch fencing 机制防止 split-brain，实现「宁可停采也不双主」的核心安全约束。
+Scheduler 是完全自治的决策者——不依赖协调层做任何调度决策。协调层仅为 Scheduler 提供实例数据的缓存查询服务。所有 Scheduler 运行相同的确定性算法（Rendezvous Hashing），在相同的拓扑视图下产生相同的分配结果。
 
 ### 核心定位
 
 ```
-Zone Manifest (全区完整视图)
-    │
-    ▼
+                    协调层 (Redis 缓存)
+                         │
+                         │ QueryInstanceData
+                         │ (仅提供数据，不做决策)
+                         ▼
 ┌─────────────────────────────────────────────┐
 │ Job Scheduler (每节点一个)                     │
 │                                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │ Manifest │  │   Peer   │  │  Slot    │   │
-│  │ Manager  │  │ Detection│  │ Owner    │   │
-│  │          │  │ (VRRP)   │  │ Negotiate│   │
+│  │ Instance │  │ Gossip   │  │Rendezvous│   │
+│  │ Sync     │  │ Protocol │  │ Hashing  │   │
+│  │(从协调层  │  │(拓扑同步) │  │(实例→节点│   │
+│  │ 拉取数据)│  │          │  │ 映射)    │   │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
 │       │              │              │         │
 │       └──────────────┼──────────────┘         │
@@ -31,6 +35,8 @@ Zone Manifest (全区完整视图)
 │               ┌──────┴──────┐                 │
 │               │   Agent     │                 │
 │               │  Scheduler  │                 │
+│               │(任务分配 +   │                 │
+│               │ 健康检测)   │                 │
 │               └──────┬──────┘                 │
 └──────────────────────┼────────────────────────┘
                        │ Push 采集指令 + Pull 任务同步
@@ -43,16 +49,18 @@ Zone Manifest (全区完整视图)
 ## 二、职责边界
 
 **本文档负责**：
-- Zone Manifest 的本地管理与热更新
-- Peer 检测协议（VRRP 风格心跳、状态判定）
-- Slot 归属协商（分配、接管、epoch fencing）
+- 从协调层拉取实例数据（增量 + 全量校验）
+- Gossip 协议（拓扑同步、节点状态感知）
+- Rendezvous Hashing（实例→节点的确定性映射）
 - Agent 调度（任务分配、负载均衡、故障重分配）
-- 节点状态机（REGISTER → HEALTHY → EXPIRED 等）
-- 状态上报（向 Coordinator、Control Plane、Peer 的汇报协议）
+- 健康检测（合并原 K3 组件健康模块）
+- 节点加入/离开的三层防抖
+- 代理服务（防火墙简化）
+- 状态上报（向协调层和控制面的观测数据）
 
 **本文档不负责**：
-- Zone Manifest 的生成与跨区下发（→ `cross-plane/zone-manifest-protocol.md`）
-- Coordinator 的 epoch 签发逻辑（→ `coordination-plane/collection-task-scheduling.md`）
+- 实例数据的定义与管理（→ 控制面实例注册表）
+- 实例数据的缓存与中继（→ `coordination-plane/collection-task-scheduling.md`）
 - Agent 的内部采集实现（→ `data-plane/agent.md`）
 - 降级阶梯的整体定义（→ `cross-plane/degradation-autonomy.md`）
 - OTel Collector 的数据管道管理（→ `data-plane/otel-collector.md`）
@@ -65,220 +73,240 @@ Zone Manifest (全区完整视图)
 
 | 功能模块 | 功能项 | 优先级 | 说明 |
 |---------|--------|--------|------|
-| Manifest 管理 | 接收并持有完整 Zone Manifest | P0 | 从 Zone Agent 获取 |
-| Manifest 管理 | Manifest 版本追踪与校验 | P0 | 拒绝低版本，检测跳号 |
-| Manifest 管理 | Manifest 热更新（diff 应用） | P0 | 不重启生效 |
-| Manifest 管理 | Manifest 本地持久化 | P1 | 重启后恢复 |
-| Peer 检测 | 3s 心跳广播 | P0 | VRRP 风格 Advertisement |
-| Peer 检测 | 节点状态判定（SUSPECT/EXPIRED） | P0 | 非对称独立检测 |
-| Peer 检测 | 节点信息维护（peer table） | P0 | 所有已知节点的状态表 |
-| Slot 归属 | 初始 slot 分配 | P0 | 启动时均分 |
-| Slot 归属 | 故障接管（takeover） | P0 | 节点失效后多数派投票 |
-| Slot 归属 | Epoch fencing | P0 | 复合令牌防 split-brain |
-| Slot 归属 | 再均衡响应 | P1 | 响应 Coordinator 的迁移指令 |
+| 实例数据同步 | 从协调层增量拉取实例变更 | P0 | 基于 updatetime 的增量查询 |
+| 实例数据同步 | root_hash 快速对账 | P0 | 一致时跳过拉取 |
+| 实例数据同步 | 定期全量校验 | P1 | 修正增量同步遗漏 |
+| 实例数据同步 | 本地缓存管理 | P0 | 协调层故障时使用本地缓存 |
+| Gossip 协议 | 拓扑信息传播 | P0 | 节点上下线、健康状态 |
+| Gossip 协议 | 网络分区处理 | P0 | 各分区独立计算，允许重复采集 |
+| Gossip 协议 | 分区恢复后去重 | P1 | Gossip 收敛后自动消除重复 |
+| Rendezvous Hashing | 实例→节点确定性映射 | P0 | hash(instance_id + node_id) 最高分 |
+| Rendezvous Hashing | 节点变更时最小迁移 | P0 | 仅故障节点的实例需要重新分配 |
+| Rendezvous Hashing | 三层防抖 | P0 | 稳定窗口 + 迁移限速 + 冷却期 |
 | Agent 调度 | Agent 注册与发现 | P0 | 管理本节点所有 Agent |
 | Agent 调度 | 采集任务分配 | P0 | 按类型/负载/健康分配 |
-| Agent 调度 | Agent 健康监控 | P0 | 周期性检查 |
+| Agent 调度 | Agent 健康检测 | P0 | 合并原 K3 组件健康模块 |
 | Agent 调度 | Agent 故障重分配 | P1 | Agent 失效时迁移 target |
-| Agent 调度 | SyncTasks 任务同步 | P0 | Agent 周期性同步任务列表（Pull 安全网） |
-| Agent 调度 | 采集间隔层级解析 | P1 | 平台默认 → TaskSpec → Target 三级配置 |
-| 状态上报 | Coordinator 心跳（15s） | P0 | alive session |
-| 状态上报 | 控制面观测矩阵（10s） | P0 | slot/agent/采集统计 |
-| 状态上报 | Peer Advertisement（3s） | P0 | 节点间状态同步 |
+| Agent 调度 | Push + Pull 双模任务分配 | P0 | Push 为主，Pull 安全网 |
+| 代理服务 | Scheduler Proxy | P1 | 防火墙简化（N×M → N×1） |
+| 状态上报 | 观测数据上报 | P1 | 采集统计、节点状态 |
 
-### 3.2 Manifest 管理
+### 3.2 实例数据同步
 
-#### 3.2.1 Manifest 接收与存储
+#### 3.2.1 同步策略
 
-Job Scheduler 启动时，从 Zone Agent 获取当前 Zone Manifest。Manifest 是全区完整清单，包含所有 slot、target、agent 信息。每个 Job Scheduler 持有的 Manifest 内容完全相同，差异仅在于各自拥有的 slot 子集。
+Scheduler 通过协调层获取实例数据，采用「hash 优先 + 增量拉取 + 全量兜底」的三层策略：
 
 ```
-Zone Agent                         Job Scheduler (Node A)
-    │                                    │
-    │  Push Manifest v42                 │
-    │───────────────────────────────────▶│
-    │                                    │  校验 version > current_version
-    │  ACK                               │  存储到内存 + 本地磁盘
-    │◀───────────────────────────────────│  应用 diff 到运行态
-    │                                    │
+同步流程:
+  1. Scheduler 定期向协调层请求 root_hash
+  2. 与本地 root_hash 比较:
+     ├── 相同 → 跳过，无需拉取（快速路径）
+     └── 不同 → 发送增量查询（since_updatetime）
+  3. 增量拉取后再次校验 root_hash:
+     ├── 相同 → 同步完成
+     └── 不同 → 发送全量查询（兜底）
+  4. 定期（默认 60s）执行全量校验，修正增量同步的遗漏
 ```
 
-#### 3.2.2 版本追踪规则
-
-- `version` 单调递增，每次 TaskSpec 变更 +1
-- Job Scheduler 拒绝接受 `version <= current_version` 的 Manifest
-- 检测到跳号（v41 → v43）时，主动拉取缺失版本或请求全量同步
-- Manifest 变更采用 diff 应用模式，避免全量替换的性能开销
-
-#### 3.2.3 热更新流程
+#### 3.2.2 双层版本对账
 
 ```
-Manifest v42 → v43 (新增 target T100 到 slot 5)
-    │
-    ▼
-Job Scheduler 处理流程：
-    1. 解析 diff：slot 5 新增 target T100
-    2. 检查 slot 5 归属：
-       ├── 属于本节点 → 将 T100 分配给本地 Agent
-       └── 属于其他节点 → 仅更新本地 Manifest 缓存
-    3. 更新内存 Manifest 为 v43
-    4. 持久化到本地磁盘
-    5. 下次 Peer Advertisement 携带新版本的 hash
+外层版本: snapshot_version
+  └── 协调层从控制面拉取数据的时间戳
+  └── 标识协调层缓存的整体新鲜度
+
+内层版本: updatetime (per instance)
+  └── 每个实例记录的独立更新时间
+  └── 用于增量查询和逐实例对比
+
+对账流程:
+  Scheduler 上报 hash(all instance_id + updatetime pairs)
+    → 协调层对比自身 hash
+    → 匹配 = 完全一致，跳过
+    → 不匹配 = 逐实例比对 updatetime，仅更新变化的实例
 ```
 
-### 3.3 Peer 检测协议
-
-#### 3.3.1 心跳机制
-
-所有 Job Scheduler 节点之间形成全连接 mesh（full mesh），每个节点周期性（默认 3s）向所有其他节点广播 VRRP Advertisement。
+#### 3.2.3 降级行为
 
 ```
-Node A (3s) ───Advertisement───▶ Node B
-Node A (3s) ───Advertisement───▶ Node C
-Node B (3s) ───Advertisement───▶ Node A
-Node B (3s) ───Advertisement───▶ Node C
-Node C (3s) ───Advertisement───▶ Node A
-Node C (3s) ───Advertisement───▶ Node B
+协调层不可达时:
+  1. Scheduler 使用最后已知的实例数据（本地缓存）
+  2. 继续正常运行，不影响已分配的采集任务
+  3. 不感知控制面的新增/删除/变更
+  4. 协调层恢复后，自动追赶缺失的变更
 ```
 
-Advertisement 报文内容：
+### 3.3 Gossip 协议
 
-```yaml
-VRRPAdvertisement:
-  sender_node_id: string          # 发送者标识
-  zone_id: string                 # 所属网区
-  manifest_version: uint64        # 当前持有的 Manifest 版本
-  owned_slots: [uint32]           # 当前拥有的 slot 列表（摘要）
-  owned_slots_hash: string        # slot 归属的 hash（快速对比）
-  health_status: enum             # HEALTHY / DEGRADED / OVERLOADED
-  agent_inventory:                # 本地 Agent 清单摘要
-    total: uint32
-    healthy: uint32
-    by_type: map<string, uint32>  # 各类型 Agent 数量
-  epoch_token: string             # 当前 epoch 令牌
-  timestamp: timestamp            # 发送时间
-  seq: uint64                     # 序列号（用于检测丢失）
-```
+#### 3.3.1 协议概述
 
-#### 3.3.2 状态判定逻辑
-
-每个节点独立维护一张 peer table，记录所有已知节点的状态。状态判定是非对称的——每个节点独立判断其他节点的状态，不存在全局共识。
+Scheduler 间通过 Gossip 协议同步拓扑视图（哪些节点在线/离线、健康状态）。**不传播任务配置**——仅传播拓扑信息。所有 Scheduler 运行相同的确定性算法，因此相同的拓扑视图必然产生相同的分配结果。
 
 ```
-                         连续 missed_count
-  ┌─────────┐    miss    ┌──────────┐   miss M次    ┌──────────┐
-  │ HEALTHY  │──────────▶│ SUSPECT  │──────────────▶│ EXPIRED  │
-  └─────────┘            └──────────┘               └──────────┘
-       ▲                      │                         │
-       │   收到心跳            │ 收到心跳                 │ 收到心跳
-       └──────────────────────┘                         │
-       ▲                                                │
-       └────────────────────────────────────────────────┘
-                     (重新收到心跳 → 回到 HEALTHY)
+Gossip 传播内容:
+  ├── node_id: 节点标识
+  ├── status: alive / suspect / dead
+  ├── last_seen: 最后活跃时间
+  ├── agent_inventory: 本节点 Agent 类型与数量摘要
+  └── incarnation: 节点启动版本号（防止旧信息复活）
+
+不传播:
+  ├── 实例配置（从协调层获取）
+  ├── 任务分配结果（本地独立计算）
+  └── 凭据数据（从协调层获取）
 ```
 
-判定参数：
+#### 3.3.2 Gossip 传播机制
+
+```
+传播模式:
+  每个 Scheduler 周期（默认 3s）选择 1~2 个随机 peer，
+  发送自身状态 + 已知的其他节点状态摘要。
+
+  5 节点示例:
+    Round 1: A→B, C→D
+    Round 2: B→E, D→A
+    Round 3: A→C, E→B
+    ...
+
+  收敛时间: O(log N) 轮，5 节点约 3~5 轮（9~15s）
+```
+
+#### 3.3.3 网络分区处理
+
+```
+分区场景:
+  ┌──────────────┐     ┌──────────────┐
+  │  A, B, C     │     │  D, E        │
+  │  (分区 1)     │     │  (分区 2)     │
+  │              │     │              │
+  │  独立计算:    │     │  独立计算:    │
+  │  认为 D,E 死  │     │  认为 A,B,C 死│
+  │  接管 D,E 的  │     │  接管 A,B,C 的│
+  │  实例         │     │  实例         │
+  └──────────────┘     └──────────────┘
+
+  结果: 部分实例被两个分区同时采集（重复采集）
+  这是可接受的——重复采集优于数据空洞
+
+  恢复后:
+    分区愈合 → Gossip 收敛（O(log N) 轮）
+    → 所有节点看到相同拓扑视图
+    → Rendezvous Hashing 产生相同结果
+    → 重复采集自动消除
+```
+
+### 3.4 Rendezvous Hashing（最高随机权重）
+
+#### 3.4.1 算法描述
+
+Rendezvous Hashing 替代了 Slot 模型（DEC-014）。每个实例通过确定性哈希直接映射到节点，无需中间的槽位层。
+
+```
+算法:
+  对于每个 instance_id:
+    对每个在线节点 node_id:
+      score = hash(instance_id + node_id)
+    将实例分配给 score 最高的节点
+
+  示例 (3 节点, 5 实例):
+    inst-001: hash(A)=0.82, hash(B)=0.45, hash(C)=0.67 → A
+    inst-002: hash(A)=0.31, hash(B)=0.91, hash(C)=0.53 → B
+    inst-003: hash(A)=0.44, hash(B)=0.28, hash(C)=0.89 → C
+    inst-004: hash(A)=0.15, hash(B)=0.73, hash(C)=0.62 → B
+    inst-005: hash(A)=0.56, hash(B)=0.41, hash(C)=0.78 → C
+
+  结果: A=1, B=2, C=2 (基本均衡)
+```
+
+#### 3.4.2 关键性质
+
+| 性质 | 说明 |
+|------|------|
+| 完全确定性 | 相同拓扑视图 → 相同分配结果，无需节点间协商 |
+| 最小迁移 | 节点离开时，仅该节点的实例需要重新分配 |
+| 天然均衡 | 标准差约 3~5%，无需虚拟节点或环 |
+| 无需协调 | 每个节点独立计算，结果一致 |
+
+**与 Slot 模型对比：**
+
+```
+Slot 模型 (已废弃):
+  实例 → Slot → 节点
+  需要: 槽位管理、VRRP 协商、Epoch Fencing、多数派投票
+  复杂度: 高
+
+Rendezvous Hashing (当前):
+  实例 → 节点（直接映射）
+  需要: 哈希函数 + 在线节点列表
+  复杂度: 低
+```
+
+#### 3.4.3 节点变更处理
+
+```
+节点离开 (Node B 故障):
+  原分配: A=1, B=2, C=2
+  inst-002 和 inst-004 需要重新计算
+
+  inst-002: hash(A)=0.31, hash(C)=0.53 → C (从 B 迁移到 C)
+  inst-004: hash(A)=0.15, hash(C)=0.62 → C (从 B 迁移到 C)
+
+  新分配: A=1, B=0, C=4
+  仅 B 的 2 个实例迁移，A 和 C 的原有实例不受影响
+
+节点加入 (Node D 恢复):
+  所有实例重新计算，部分从 B/C 迁移到 D
+  迁移量取决于 D 的哈希覆盖范围
+```
+
+### 3.5 三层防抖机制
+
+#### 3.5.1 概述
+
+节点加入/离开时，为避免因网络抖动或短暂故障导致的频繁重分配，采用三层防抖机制（DEC-019）。
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    三层防抖机制                                 │
+│                                                              │
+│  Layer 1: 稳定窗口 (Stabilization Window)                     │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ 节点心跳超时 → 等待 3 个心跳周期 (~9s)                   │  │
+│  │ 期间若恢复 → 不触发迁移                                  │  │
+│  │ 防止: 网络抖动导致的误判                                  │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                          │                                    │
+│                          ▼                                    │
+│  Layer 2: 迁移限速 (Migration Rate Limit)                     │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ 每个协调周期最多迁移 10% 的总实例数                       │  │
+│  │ 超出部分排队到下一个周期                                  │  │
+│  │ 防止: 大量实例同时迁移导致的负载尖峰                       │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                          │                                    │
+│                          ▼                                    │
+│  Layer 3: 冷却期 (Cooldown)                                   │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ 迁移完成后等待 5 分钟，期间不允许新的迁移                   │  │
+│  │ 防止: 迁移本身导致的负载波动触发新一轮迁移                  │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 3.5.2 参数配置
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| heartbeat_interval | 3s | 心跳发送间隔 |
-| suspect_threshold | 3 | 连续 missed 次数 → SUSPECT |
-| expired_threshold | 5 | 连续 missed 次数 → EXPIRED |
-| skew_tolerance | 500ms | 时间偏差容忍度 |
+| heartbeat_interval | 3s | Gossip 传播间隔 |
+| stabilization_window | 9s (3 × heartbeat) | 节点离线确认等待时间 |
+| migration_rate_limit | 10% / cycle | 每周期最大迁移比例 |
+| cooldown_period | 5 min | 迁移后冷却时间 |
 
-- **SUSPECT**（疑似故障）：连续 3 次未收到心跳（约 9s）。节点可能网络抖动或负载过高。此时不触发任何操作，仅标记。
-- **EXPIRED**（确认过期）：连续 5 次未收到心跳（约 15s）。节点被认为不可用，可触发 slot 接管流程。
+### 3.6 Agent 调度
 
-#### 3.3.3 非对称检测的意义
-
-非对称检测意味着 Node A 可能认为 Node B 已 EXPIRED，但 Node C 仍认为 Node B 是 HEALTHY。这是正常且预期的行为。Slot 接管需要多数派共识（见 3.4），非对称检测只是提供输入信息，不直接触发状态变更。
-
-### 3.4 Slot 归属协商
-
-#### 3.4.1 初始分配
-
-网区启动时，所有 slot 需要在 Job Scheduler 节点间均分。
-
-```
-总 slot 数: 12
-节点数: 3 (A, B, C)
-每节点分配: 12 / 3 = 4 slots
-
-Node A: slot [0, 1, 2, 3]
-Node B: slot [4, 5, 6, 7]
-Node C: slot [8, 9, 10, 11]
-```
-
-初始分配由 Coordinator 协调完成（L0 模式），或由节点间协商完成（L3 模式）。
-
-分配算法：
-1. 计算 `base_count = total_slots / node_count`
-2. 计算 `remainder = total_slots % node_count`
-3. 前 `remainder` 个节点各多分配 1 个 slot
-4. 生成分配方案，Coordinator 签发 epoch token
-
-#### 3.4.2 故障接管（Takeover）
-
-当某节点被多数派判定为 EXPIRED 时，其拥有的 slot 需要被其他节点接管。
-
-```
-Node B 被判定 EXPIRED
-    │
-    ▼
-Node A 和 Node C 检测到 B 过期
-    │
-    ▼
-接管协商流程：
-    1. Node A 广播 "B 的 slot [4,5,6,7] 待接管" 提案
-    2. Node C 评估自身负载，回复可接管的 slot 子集
-    3. 多数派达成共识（A 接管 [4,5]，C 接管 [6,7]）
-    4. 向 Coordinator 请求签发新 epoch token
-    5. Coordinator 签发 → 接管生效
-    6. 如果 Coordinator 不可用（L3）→ 多数派投票直接生效
-```
-
-**关键约束**：
-- 接管需要 >50% 存活节点同意（多数派原则）
-- 无法达成多数派时，slot 留空（宁可停采也不双主）
-- 接管后的 slot 归属仍携带 epoch token，防止旧节点恢复后冲突
-
-#### 3.4.3 Epoch Fencing
-
-Epoch fencing 是防止 split-brain 的核心机制。每个 slot 的归属由一个复合令牌唯一标识：
-
-```
-EpochToken = zone_epoch + ":" + slot_version
-
-zone_epoch:    由 Coordinator 签发，全区统一的纪元编号
-slot_version:  该 slot 的归属版本号（每次归属变更 +1）
-```
-
-```
-示例：
-  zone_epoch = "ze-42"
-  slot 5 的归属历史：
-    ze-42:1 → Node A (初始分配)
-    ze-42:2 → Node C (Node A 故障后接管)
-    ze-43:1 → Node B (新 epoch 后重新分配)
-```
-
-Epoch token 的作用：
-- Agent 执行采集时携带 epoch token
-- 如果旧节点恢复并尝试执行已不属于自己的 slot，其 epoch token 过期，数据被拒绝
-- Coordinator 通过 epoch token 判断归属的合法性
-
-#### 3.4.4 「空洞优于双主」原则
-
-当出现以下情况时，slot 暂时无人拥有（空洞）：
-- 节点故障，但存活节点无法达成接管多数派
-- 网络分区导致多个分区各自无法形成多数派
-- Epoch token 签发失败（Coordinator 不可用且无法多数派投票）
-
-空洞是安全的——该 slot 的 target 暂停采集，但不会产生重复数据或归属冲突。空洞在 Coordinator 恢复或网络恢复后自动修复。
-
-### 3.5 Agent 调度
-
-#### 3.5.1 Agent 注册
+#### 3.6.1 Agent 注册
 
 节点上的每种 Agent 类型在启动时向本地 Job Scheduler 注册：
 
@@ -293,23 +321,47 @@ AgentRegistration:
   metadata: map<string, string> # 扩展信息
 ```
 
-#### 3.5.2 任务分配策略
+#### 3.6.2 任务分配策略
 
 Job Scheduler 根据以下因素决定将 target 分配给哪个 Agent：
 
 ```
-分配决策流程：
-    1. 类型匹配：target 需要的 agent_type 必须与 Agent 声明的类型一致
-    2. 容量检查：Agent 当前 target 数 < capacity
-    3. 负载均衡：在满足 1、2 的 Agent 中，选择 current_targets 最少的
-    4. 健康检查：排除 state 为 error 或 offline 的 Agent
-    5. 亲和性（可选）：优先分配给上次执行同一 target 的 Agent（减少上下文切换）
+分配决策流程:
+    1. 类型匹配: target 需要的 agent_type 必须与 Agent 声明的类型一致
+    2. 容量检查: Agent 当前 target 数 < capacity
+    3. 负载均衡: 在满足 1、2 的 Agent 中，选择 current_targets 最少的
+    4. 健康检查: 排除 state 为 error 或 offline 的 Agent
+    5. 亲和性（可选）: 优先分配给上次执行同一 target 的 Agent（减少上下文切换）
 ```
 
-#### 3.5.3 Agent 故障处理
+#### 3.6.3 采集决策：双状态模型
+
+实例的采集决策由两个独立状态共同决定（DEC-020）：
 
 ```
-Agent 故障检测与重分配：
+actual_scrape = enabled (协调层) AND healthy (本地检测)
+
+enabled (管理状态):
+  ├── 来源: 协调层缓存的控制面数据
+  ├── 变更: 管理员在控制面启用/禁用实例
+  └── 含义: "这个实例应该被采集吗？"
+
+healthy (健康状态):
+  ├── 来源: Scheduler 本地健康检测
+  ├── 变更: 健康检查通过/失败
+  └── 含义: "这个实例现在能采到数据吗？"
+
+组合结果:
+  enabled=true  + healthy=true  → 正常采集
+  enabled=true  + healthy=false → 暂停采集（目标不可达）
+  enabled=false + healthy=true  → 不采集（管理员禁用）
+  enabled=false + healthy=false → 不采集
+```
+
+#### 3.6.4 Agent 故障处理
+
+```
+Agent 故障检测与重分配:
     │
     ▼
 Job Scheduler 检测到 Agent 健康检查失败
@@ -317,45 +369,29 @@ Job Scheduler 检测到 Agent 健康检查失败
     ├── 同类型有其他健康 Agent → 将 target 迁移到同类型 Agent
     │
     ├── 同类型无其他 Agent → 标记 target 为 pending
-    │   └── 等待新 Agent 注册或节点间协调
+    │   └── 等待新 Agent 注册
     │
     └── 如果 Agent 间歇性故障 → 加入 quarantine 列表
         └── 不再分配新 target，等待恢复或手动干预
 ```
 
-#### 3.5.4 Push + Pull 双模任务分配
+#### 3.6.5 Push + Pull 双模任务分配
 
 任务分配采用 Push 为主、Pull 为辅的双模机制：
 
 **Push 模式（主路径）**：
-- 当 Manifest 变更、slot 归属变化、或新 target 需要分配时，Job Scheduler 主动发送 CollectionInstruction 到 Agent
+- 当 Rendezvous Hashing 结果变更、新实例到达、或 Agent 故障时，Scheduler 主动发送 CollectionInstruction 到 Agent
 - 事件驱动，延迟低（毫秒级）
 - Agent 收到指令后自行完成采集和数据推送
 
 **Pull 模式（安全网）**：
-- Agent 每 30s 向 Job Scheduler 发送 SyncTasks 请求，携带当前持有的任务列表
-- Job Scheduler 对比自身视图，返回 diff（需要新增/删除/更新的任务）
+- Agent 每 30s 向 Scheduler 发送 SyncTasks 请求，携带当前持有的任务列表
+- Scheduler 对比自身视图，返回 diff（需要新增/删除/更新的任务）
 - 补偿因网络抖动、消息丢失等原因导致的任务不一致
-- SyncTasks 也是 Agent 向 Scheduler 报告存活状态的机会
 
-**Agent 自主执行**：
-- Agent 收到采集任务后，自主按 scrape_interval 周期执行采集
-- 采集数据由 Agent 直接推送到 OTel Collector（不经过 Scheduler）
-- Agent 向 Scheduler 上报的是采集元数据（成功/失败/耗时），而非数据本身
-
-#### 3.5.5 采集间隔配置层级
+#### 3.6.6 采集间隔配置层级
 
 采集间隔（scrape_interval）遵循以下优先级（从高到低）：
-
-```
-平台默认值 (platform_default_scrape_interval)
-    │
-    ▼  被 TaskSpec 覆盖
-TaskSpec 级别 (task_scrape_interval)
-    │
-    ▼  被 Target 级别覆盖
-Target 级别 (target_scrape_interval)
-```
 
 | 层级 | 配置来源 | 默认值 | 说明 |
 |------|---------|--------|------|
@@ -365,253 +401,153 @@ Target 级别 (target_scrape_interval)
 
 CollectionInstruction 中的 scrape_interval 字段已经过层级解析，Agent 直接使用最终值。
 
-#### 3.5.6 Agent 生命周期管理
+### 3.7 健康检测（合并原 K3）
+
+#### 3.7.1 概述
+
+原 K3 组件健康模块的功能合并入 Scheduler（DEC-017）。Scheduler 直接检测本节点 Agent 和目标实例的健康状态，无需独立的健康检测组件。
 
 ```
-               注册
-                │
-                ▼
-  ┌─────── REGISTER ───────┐
-  │                         │
-  │   健康检查通过           │
-  │        │                │
-  │        ▼                │
-  │    WARMING (预热)       │
-  │   (分配少量 target      │
-  │    验证采集正常)         │
-  │        │                │
-  │        ▼                │
-  │    HEALTHY (健康)       │
-  │   (正常承载 target)     │
-  │        │                │
-  │   ┌────┼────┐           │
-  │   │    │    │           │
-  │   ▼    ▼    ▼           │
-  │ ERROR  │  DRAINING      │
-  │(故障)  │  (排空中)       │
-  │   │    │    │           │
-  │   ▼    │    ▼           │
-  │ QUAR-  │  OFFLINE       │
-  │ ANTINED│  (已下线)       │
-  │        │                │
-  └────────┼────────────────┘
-           │
-      恢复健康 → 回到 HEALTHY
+健康检测范围:
+  ├── Agent 健康: 本地 Agent 进程存活、资源使用、响应能力
+  └── 目标健康: 采集目标可达性（通过采集结果判断）
+
+检测方式:
+  ├── Agent 自报告: Agent 在 SyncTasks 中上报自身状态
+  ├── Scheduler 主动检查: 周期性健康检查请求
+  └── 采集结果推断: 连续 N 次采集失败 → 标记目标不健康
 ```
 
-### 3.6 节点状态机
-
-#### 3.6.1 完整状态定义
+#### 3.7.2 健康状态传播
 
 ```
-                    ┌──────────────────────────────────────────────┐
-                    │                                              │
-  ┌──────────┐     │     ┌──────────┐     ┌──────────┐           │
-  │ REGISTER │─────┼────▶│ WARMING  │────▶│ HEALTHY  │           │
-  └──────────┘     │     └──────────┘     └──────────┘           │
-                   │          │               │    │              │
-                   │          │ 异常           │    │ 主动下线     │
-                   │          ▼               │    ▼              │
-                   │     ┌──────────┐         │ ┌──────────┐     │
-                   │     │ EXPIRED  │         │ │ DRAINING │     │
-                   │     └──────────┘         │ └────┬─────┘     │
-                   │                          │      │            │
-                   │     ┌──────────┐         │      ▼            │
-                   │     │ SUSPECT  │         │  ┌──────────┐    │
-                   │     └────┬─────┘         │  │ OFFLINE  │    │
-                   │          │               │  └──────────┘    │
-                   │          │ 确认故障       │                  │
-                   │          ▼               │                  │
-                   │     ┌──────────┐         │                  │
-                   │     │ EXPIRED  │         │                  │
-                   │     └────┬─────┘         │                  │
-                   │          │               │                  │
-                   │          ▼               │                  │
-                   │     ┌──────────┐         │                  │
-                   │     │ FENCED   │         │                  │
-                   │     └──────────┘         │                  │
-                   │                          │                  │
-                   │     ┌──────────┐         │                  │
-                   └────▶│QUARANTINED│◀───────┘                  │
-                         └──────────┘                            │
-                                                                 │
-                         隔离恢复 ───────────────────────────────┘
+健康检测结果仅影响本地 Scheduler 的采集决策:
+  ├── healthy=true → actual_scrape = enabled（正常采集）
+  └── healthy=false → actual_scrape = false（暂停采集）
+
+健康状态不通过 Gossip 传播（每个节点独立检测自己的 Agent 和目标）
 ```
 
-| 状态 | 含义 | 可执行操作 | 持续时间 |
-|------|------|-----------|---------|
-| REGISTER | 节点刚启动，注册到 Coordinator | 无 | 短暂 |
-| WARMING | 预热中，接收 Manifest，建立 peer 连接 | 接收数据，不承载 slot | 10-30s |
-| HEALTHY | 正常运行，承载 slot | 全部操作 | 持续 |
-| SUSPECT | 疑似故障（被其他节点检测） | 仍执行采集（自身视角可能正常） | 短暂 |
-| EXPIRED | 确认过期，slot 待接管 | 无（被隔离） | 直到恢复 |
-| FENCED | 被 epoch fencing 隔离 | 无（必须人工干预或 Coordinator 解除） | 持久 |
-| DRAINING | 主动下线中，排空 slot | 迁移 slot，不接收新 target | 直到排空 |
-| OFFLINE | 已下线 | 无 | 持久 |
-| QUARANTINED | 隔离观察（间歇性故障） | 有限操作（不承载新 slot） | 直到恢复 |
+### 3.8 代理服务（Scheduler Proxy）
 
-#### 3.6.2 状态转换条件
+#### 3.8.1 概述
 
-| 转换 | 触发条件 | 动作 |
-|------|---------|------|
-| REGISTER → WARMING | Coordinator 确认注册 | 开始接收 Manifest |
-| WARMING → HEALTHY | Manifest 加载完成 + peer 连接建立 | 开始承载 slot |
-| HEALTHY → SUSPECT | 被 peer 检测为疑似故障 | 标记，不立即操作 |
-| SUSPECT → EXPIRED | 被多数派确认过期 | 触发 slot 接管 |
-| SUSPECT → HEALTHY | 重新收到 peer 心跳 | 清除嫌疑标记 |
-| EXPIRED → FENCED | epoch token 过期 | 完全隔离 |
-| HEALTHY → DRAINING | 管理员发起下线 | 开始 slot 迁移 |
-| DRAINING → OFFLINE | 所有 slot 迁移完成 | 完全下线 |
-| HEALTHY → QUARANTINED | 间歇性故障被检测 | 限制操作 |
-| QUARANTINED → HEALTHY | 连续 N 次健康检查通过 | 恢复正常 |
+为简化防火墙配置，Scheduler 提供代理服务（DEC-021）。控制面/协调层只需与一个 Scheduler 建立连接，由该 Scheduler 转发到其他节点。
 
-### 3.7 状态上报
-
-#### 3.7.1 上报目标与频率
-
-| 上报目标 | 频率 | 内容 | 协议 |
-|---------|------|------|------|
-| Coordinator | 15s | 存活心跳、epoch 确认 | gRPC/HTTP |
-| Control Plane | 10s | 观测矩阵（slot/agent/采集统计） | HTTP (via Zone Agent) |
-| Peer 节点 | 3s | VRRP Advertisement | UDP/HTTP |
-
-#### 3.7.2 观测矩阵
-
-```yaml
-ObservationMatrix:
-  node_id: string
-  timestamp: timestamp
-  report_interval: duration         # 实际报告间隔
-
-  # Slot 状态
-  slot_status:
-    owned: uint32                   # 本节点拥有的 slot 数
-    active: uint32                  # 正在执行的 slot 数
-    pending: uint32                 # 待分配的 slot 数
-    failed: uint32                  # 执行失败的 slot 数
-    per_slot:                       # 每个 slot 的详细状态
-      - slot_id: uint32
-        state: "active" | "pending" | "failed"
-        epoch_token: string
-        agent_id: string            # 执行该 slot 的 Agent
-        targets_total: uint32
-        targets_success: uint32
-        targets_failed: uint32
-
-  # Agent 状态
-  agent_status:
-    total: uint32
-    healthy: uint32
-    by_type:
-      - type: string
-        count: uint32
-        healthy: uint32
-        avg_load: float             # 平均负载 (current_targets / capacity)
-
-  # 采集统计
-  collection_stats:
-    total_scrapes: uint64           # 累计采集次数
-    scrape_success_rate: float      # 采集成功率
-    avg_scrape_duration: duration   # 平均采集耗时
-    last_scrape_timestamp: timestamp
-
-  # 节点资源
-  node_resources:
-    cpu_usage: float
-    memory_usage: float
-    network_rx_bytes: uint64
-    network_tx_bytes: uint64
 ```
+无代理 (N×M 连接):
+  控制面 → Scheduler A
+  控制面 → Scheduler B
+  控制面 → Scheduler C
+  协调层 → Scheduler A
+  协调层 → Scheduler B
+  协调层 → Scheduler C
+
+有代理 (N×1 连接):
+  控制面 → Scheduler A (代理)
+  协调层 → Scheduler A (代理)
+  Scheduler A → Scheduler B (内部转发)
+  Scheduler A → Scheduler C (内部转发)
+
+  防火墙只需开放 Scheduler A 的端口
+```
+
+#### 3.8.2 代理职责
+
+| 功能 | 说明 |
+|------|------|
+| 数据转发 | 将控制面/协调层的请求转发到目标节点 |
+| 响应聚合 | 收集各节点的响应，聚合后返回 |
+| 代理选举 | 节点间通过 Gossip 协商，node_id 最小者为代理 |
+| 故障转移 | 代理节点故障时，自动选举新代理 |
 
 ---
 
 ## 四、核心数据模型
 
-### 4.1 NodeState（节点状态）
+### 4.1 NodeView（节点拓扑视图）
 
 ```yaml
-NodeState:
-  node_id: string                   # 节点唯一标识
-  zone_id: string                   # 所属网区
-  state: enum                       # REGISTER | WARMING | HEALTHY | SUSPECT |
-                                    # EXPIRED | FENCED | DRAINING | OFFLINE | QUARANTINED
-  owned_slots: [uint32]             # 当前拥有的 slot ID 列表
-  agents: [AgentStatus]             # 本节点所有 Agent 状态
-  last_heartbeat: timestamp         # 最后发送心跳时间
-  epoch_token: string               # 当前 epoch 令牌 (zone_epoch:slot_version)
-  manifest_version: uint64          # 当前持有的 Manifest 版本
-  started_at: timestamp             # 节点启动时间
-  resources:
-    cpu_usage: float                # CPU 使用率 (0.0 ~ 1.0)
-    memory_usage: float             # 内存使用率
-    memory_total: uint64            # 总内存 (bytes)
-    memory_available: uint64        # 可用内存 (bytes)
+NodeView:
+  my_node_id: string                  # 本节点标识
+  known_nodes:                        # 已知节点列表
+    - node_id: string
+      status: alive | suspect | dead
+      last_seen: timestamp
+      incarnation: uint64             # 启动版本号
+      agent_inventory:
+        total: uint32
+        by_type: map<string, uint32>
+  view_version: uint64                # 视图版本（每次更新递增）
+  last_gossip_round: timestamp        # 最后一次 Gossip 传播时间
+  root_hash: string                   # 从协调层获取的 root_hash
+  local_instances: [InstanceRecord]   # 本地缓存的实例数据
 ```
 
-### 4.2 AgentStatus（Agent 状态）
+### 4.2 AssignmentResult（分配结果）
 
 ```yaml
-AgentStatus:
-  agent_id: string                  # Agent 唯一标识
-  agent_type: string                # scrape | snmp | probe | oracle | mysql | windows | custom
-  state: enum                       # idle | collecting | error | offline
-  current_targets: uint32           # 当前承载的 target 数量
-  capacity: uint32                  # 最大可承载 target 数
-  last_collection: timestamp        # 最后一次成功采集时间
-  error_count: uint32               # 累计错误次数
-  consecutive_errors: uint32        # 连续错误次数（用于故障判定）
-  registered_at: timestamp          # 注册时间
-  metadata: map<string, string>     # 扩展信息
+AssignmentResult:
+  node_id: string                     # 本节点
+  computed_at: timestamp              # 计算时间
+  view_version: uint64                # 基于的拓扑视图版本
+
+  # 本节点负责的实例列表
+  my_instances:
+    - instance_id: string
+      assigned_by: "rendezvous_hash"  # 分配方式
+      target: TargetInfo
+      agent_id: string                # 分配的 Agent
+      enabled: bool                   # 管理状态（来自协调层）
+      healthy: bool                   # 健康状态（来自本地检测）
+      actual_scrape: bool             # 实际是否采集
+
+  # 统计
+  total_instances: uint32             # 全区总实例数
+  my_count: uint32                    # 本节点负责的实例数
+  active_count: uint32                # 实际采集中的实例数
 ```
 
-### 4.3 PeerEntry（Peer 表项）
+### 4.3 GossipMessage（Gossip 消息）
 
 ```yaml
-PeerEntry:
-  node_id: string                   # 对端节点 ID
-  last_advertisement: timestamp     # 最后收到的 Advertisement 时间
-  missed_count: uint32              # 连续未收到心跳的次数
-  detected_state: enum              # HEALTHY | SUSPECT | EXPIRED
-  advertised_slots: [uint32]        # 对端声称拥有的 slot
-  advertised_epoch: string          # 对端的 epoch token
-  advertised_manifest_version: uint64
-  rtt_ms: float                     # 往返延迟 (ms)
-  seq_last: uint64                  # 最后收到的序列号
-  seq_expected: uint64              # 期望的下一个序列号
+GossipMessage:
+  sender_id: string
+  incarnation: uint64                 # 发送者的启动版本号
+
+  # 传播的状态摘要
+  entries:
+    - node_id: string
+      status: alive | suspect | dead
+      last_seen: timestamp
+      incarnation: uint64
+      agent_summary:
+        total: uint32
+        healthy: uint32
+        by_type: map<string, uint32>
+
+  # 向量时钟（可选，用于检测信息新旧）
+  vector_clock: map<string, uint64>   # node_id → 已知最新版本
 ```
 
-### 4.4 SlotAssignment（Slot 归属记录）
-
-```yaml
-SlotAssignment:
-  slot_id: uint32                   # Slot ID
-  owner_node_id: string             # 归属节点 ID
-  epoch_token: string               # Epoch fencing token
-  assigned_at: timestamp            # 分配时间
-  targets: [TargetRef]              # 该 slot 包含的 target 引用
-  state: enum                       # ACTIVE | PENDING | FAILED | VACANT
-
-TargetRef:
-  instance_id: string               # 关联控制面实例台账
-  endpoint: string                  # 采集地址
-  agent_type_required: string       # 所需 Agent 类型
-```
-
-### 4.5 CollectionInstruction（采集指令）
+### 4.4 CollectionInstruction（采集指令）
 
 ```yaml
 CollectionInstruction:
-  instruction_id: string            # 指令唯一 ID
-  slot_id: uint32                   # 所属 slot
-  epoch_token: string               # 当前 epoch
-  target: Target                    # 采集目标完整配置
-  scrape_interval: duration         # 采集间隔
-  scrape_timeout: duration          # 采集超时
-  credential_ref: string            # 凭据引用（非实际凭据）
-  output_endpoint: string           # 数据推送目标（OTel Collector 地址）
-  labels:                           # 附加标签
+  instruction_id: string              # 指令唯一 ID
+  instance_id: string                 # 关联控制面实例台账
+  target: TargetInfo                  # 采集目标完整配置
+  scrape_interval: duration           # 采集间隔（已解析最终值）
+  scrape_timeout: duration            # 采集超时
+  auth_type: string                   # 认证类型
+  credential:                         # 凭据（合并入实例记录，DEC-016）
+    username: string
+    password: string
+    bearer_token: string
+    tls_cert: string
+  output_endpoint: string             # 数据推送目标（OTel Collector 地址）
+  labels:                             # 附加标签
     zone_id: string
-    slot_id: string
     agent_id: string
     node_id: string
 ```
@@ -620,89 +556,52 @@ CollectionInstruction:
 
 ## 五、接口与交互
 
-### 5.1 与 Zone Agent 的交互
+### 5.1 与协调层的交互
 
 ```
-Zone Agent                              Job Scheduler
+协调层 (Redis)                          Job Scheduler
     │                                        │
-    │  PushManifest(manifest)                │
-    │───────────────────────────────────────▶│
-    │                                        │  校验、存储、应用 diff
-    │  ManifestAck(version, node_id)         │
+    │  QueryInstanceData (HashQuery)         │
     │◀───────────────────────────────────────│
-    │                                        │
-    │  PullStatus(node_id)                   │
+    │  root_hash + snapshot_version          │
     │───────────────────────────────────────▶│
     │                                        │
-    │  ObservationMatrix                     │
+    │  [hash 不同]                            │
+    │  QueryInstanceData (IncrementalQuery)  │
     │◀───────────────────────────────────────│
-    │                                        │
-```
-
-| 接口 | 方向 | 协议 | 频率 | 说明 |
-|------|------|------|------|------|
-| PushManifest | ZA → JS | HTTP/gRPC | 事件驱动 | Manifest 变更时推送 |
-| ManifestAck | JS → ZA | HTTP/gRPC | 响应 | 确认接收 |
-| PullStatus | ZA → JS | HTTP | 10s | 拉取观测矩阵 |
-| ReportAlert | JS → ZA | HTTP | 事件驱动 | 上报异常事件 |
-
-### 5.2 与 Coordinator 的交互
-
-```
-Coordinator                             Job Scheduler
-    │                                        │
-    │  HeartbeatReq(node_id)                 │
-    │◀───────────────────────────────────────│
-    │  HeartbeatResp(alive, epoch)           │
+    │  changes[]                             │
     │───────────────────────────────────────▶│
-    │                                        │
-    │  IssueEpoch(zone_epoch)                │
-    │◀───────────────────────────────────────│
-    │  EpochResp(epoch_token)                │
-    │───────────────────────────────────────▶│
-    │                                        │
-    │  RebalanceCmd(migration_plan)          │
-    │───────────────────────────────────────▶│
-    │                                        │  执行 slot 迁移
-    │  RebalanceResult(success, details)     │
-    │◀───────────────────────────────────────│
     │                                        │
 ```
 
 | 接口 | 方向 | 协议 | 频率 | 说明 |
 |------|------|------|------|------|
-| Heartbeat | JS → Co | gRPC | 15s | 存活心跳 |
-| IssueEpoch | JS → Co | gRPC | 事件驱动 | 请求签发 epoch |
-| RebalanceCmd | Co → JS | gRPC | 事件驱动 | 下发再均衡指令 |
-| SlotTakeover | JS → Co | gRPC | 事件驱动 | 请求接管 slot |
+| QueryInstanceData (Hash) | JS → 协调层 | gRPC | 10s | 查询 root_hash |
+| QueryInstanceData (Incremental) | JS → 协调层 | gRPC | 按需 | 增量拉取变更 |
+| QueryInstanceData (Full) | JS → 协调层 | gRPC | 60s | 全量校验 |
 
-### 5.3 与 Peer 节点的交互
+### 5.2 与 Peer 节点的交互（Gossip）
 
 ```
 Job Scheduler (A)                       Job Scheduler (B)
     │                                        │
-    │  VRRP Advertisement (3s)               │
+    │  GossipMessage (3s)                    │
+    │  {entries: [A:alive, C:alive]}        │
     │───────────────────────────────────────▶│
-    │                                        │
-    │  VRRP Advertisement (3s)               │
+    │                                        │  合并到本地视图
+    │  GossipMessage (3s)                    │
+    │  {entries: [B:alive, D:suspect]}      │
     │◀───────────────────────────────────────│
     │                                        │
-    │  TakeoverProposal(slots, new_owner)    │
-    │───────────────────────────────────────▶│
-    │                                        │  评估负载
-    │  TakeoverVote(accept, counter_proposal)│
-    │◀───────────────────────────────────────│
-    │                                        │
+    │  [合并后: A:alive, B:alive, C:alive, D:suspect]
+    │  [Rendezvous Hashing 重新计算]          │
 ```
 
 | 接口 | 方向 | 协议 | 频率 | 说明 |
 |------|------|------|------|------|
-| VRRP Advertisement | JS ↔ JS | UDP/HTTP | 3s | Peer 心跳 |
-| TakeoverProposal | JS → JS | HTTP | 事件驱动 | 提议接管故障节点的 slot |
-| TakeoverVote | JS → JS | HTTP | 响应 | 投票响应 |
-| StateSync | JS ↔ JS | HTTP | 事件驱动 | 状态同步（Manifest hash 对比等） |
+| GossipMessage | JS ↔ JS | HTTP/gRPC | 3s | 拓扑信息传播 |
 
-### 5.4 与 Agent 的交互
+### 5.3 与 Agent 的交互
 
 ```
 Job Scheduler                             Agent
@@ -723,12 +622,6 @@ Job Scheduler                             Agent
     │  HealthResp(status, load)              │
     │◀──────────────────────────────────────│
     │                                        │
-    │  RevokeTask(instruction_id, reason)    │
-    │───────────────────────────────────────▶│
-    │                                        │  停止采集
-    │  RevokeAck(agent_id)                   │
-    │◀──────────────────────────────────────│
-    │                                        │
     │  SyncTasks (30s)                       │
     │  { current_tasks: [task_id, ...] }     │
     │───────────────────────────────────────▶│
@@ -744,67 +637,79 @@ Job Scheduler                             Agent
 |------|------|------|------|------|
 | RegisterAgent | Agent → JS | HTTP/gRPC | 启动时 | Agent 注册 |
 | AssignTask | JS → Agent | HTTP/gRPC | 事件驱动 | 分配采集任务 |
-| TaskResult | Agent → JS | HTTP/gRPC | 每次采集后 | 上报采集结果 |
+| TaskResult | Agent → JS | HTTP/gRPC | 每次采集后 | 上报采集结果（元数据） |
 | HealthCheck | JS → Agent | HTTP | 5s | 健康检查 |
-| RevokeTask | JS → Agent | HTTP/gRPC | 事件驱动 | 撤销采集任务 |
-| SyncTasks | Agent → JS | HTTP/gRPC | 30s | Agent 同步任务列表（Pull 安全网） |
-| SyncTasksResponse | JS → Agent | HTTP/gRPC | 响应 | 返回任务 diff（新增/删除/更新） |
+| SyncTasks | Agent → JS | HTTP/gRPC | 30s | Agent 同步任务列表 |
+
+### 5.4 代理服务交互
+
+```
+控制面/协调层                          Scheduler A (代理)          Scheduler B
+    │                                       │                         │
+    │  Request(target=B)                    │                         │
+    │──────────────────────────────────────▶│                         │
+    │                                       │  Forward(target=B)      │
+    │                                       │────────────────────────▶│
+    │                                       │                         │
+    │                                       │  Response               │
+    │                                       │◀────────────────────────│
+    │  Response                            │                         │
+    │◀──────────────────────────────────────│                         │
+```
 
 ---
 
 ## 六、设计决策与替代方案
 
-### DEC-JS-01：Peer 检测协议选型
-
-| 方案 | 描述 | 优点 | 缺点 | 适用场景 |
-|------|------|------|------|---------|
-| A：VRRP 风格心跳（当前） | 周期性广播 Advertisement，独立检测 | 简单；去中心化；无额外依赖 | 检测延迟固定（受心跳间隔约束） | 推荐方案 |
-| B：Raft 共识 | 使用 Raft 的 leader election 机制 | 强一致性；成熟算法 | 引入 Raft 依赖；过度设计（只需检测，不需共识日志） | 需要强一致性选举的场景 |
-| C：Gossip 协议 | 随机节点间传播状态信息 | 大规模场景效率高 | 小规模场景 overhead 大；收敛时间不确定 | >10 节点的大规模区 |
-
-**[建议]**：方案 A。网区节点数通常为 2-5 个，VRRP 风格足够。Raft 引入不必要的复杂性，Gossip 在小规模下没有优势。
-
-### DEC-JS-02：Slot 分配策略
+### DEC-JS-01：拓扑同步协议选型
 
 | 方案 | 描述 | 优点 | 缺点 |
 |------|------|------|------|
-| A：均分（当前） | total_slots / node_count | 简单；可预测 | 不考虑节点能力差异 |
-| B：加权分配 | 按节点能力（CPU/内存/网络）加权 | 更公平；充分利用资源 | 能力评估复杂；动态变化时调整困难 |
-| C：能力感知 | 根据 Agent 类型和容量分配 | 精确匹配 | 实现复杂；Agent 变化时频繁重分配 |
+| A：VRRP 风格心跳（v1.0） | 周期性广播 Advertisement，多数派投票 | 成熟稳定 | 2 节点无法多数派；需要 Slot 模型配合 |
+| **B：Gossip 协议（当前）** | 随机节点间传播状态，最终一致性 | 大规模高效；容忍网络分区；无多数派依赖 | 收敛时间不确定 |
+| C：Raft 共识 | 使用 Raft 的 leader election | 强一致性 | 过度设计；引入 Leader 概念与自治原则冲突 |
 
-**[建议]**：阶段 1 用方案 A（均分），阶段 2 评估方案 B（加权）。方案 C 留作长期优化。
+**选择 B。** 与 Rendezvous Hashing 的确定性特性完美配合——最终一致的拓扑视图 + 确定性算法 = 最终一致的分配结果。
+
+### DEC-JS-02：实例→节点映射算法
+
+| 方案 | 描述 | 优点 | 缺点 |
+|------|------|------|------|
+| A：Slot 模型（v1.0） | 实例→Slot→节点，VRRP 协商归属 | 灵活（可加权） | 复杂度高；Slot 总数固定不灵活 |
+| **B：Rendezvous Hashing（当前）** | hash(instance_id + node_id) 最高分 | 简单；最小迁移；天然均衡 | 不支持加权 |
+| C：一致性哈希 | 虚拟节点环 + 哈希 | 成熟方案 | 需要虚拟节点；迁移量不如 Rendezvous |
+| D：取模分配 | instance_id % node_count | 最简单 | 节点变更时 ~90% 实例迁移——不可接受 |
+
+**选择 B。** 最小迁移是关键特性——节点故障时仅该节点的实例需要重新分配。
 
 ### DEC-JS-03：Agent 任务调度模式
 
 | 方案 | 描述 | 优点 | 缺点 |
 |------|------|------|------|
-| A：纯 Push（Scheduler 主动分配） | Scheduler 主动发送采集指令到 Agent | 控制力强；实时性好 | 消息丢失时 Agent 可能遗漏任务；需要可靠消息投递 |
-| B：纯 Pull（Agent 轮询 Scheduler） | Agent 主动拉取待执行的采集任务 | 解耦；Agent 自主控制节奏 | 延迟较高；轮询开销 |
-| C：Push 主 + Pull 辅（当前） | Push 为主要分配方式，Agent 每 30s 通过 SyncTasks 同步任务列表作为安全网 | 实时性好 + 一致性保障；Push 保证低延迟分配，Pull 兜底防止消息丢失 | 需要两套机制 |
+| A：纯 Push | Scheduler 主动分配 | 实时性好 | 消息丢失时遗漏任务 |
+| B：纯 Pull | Agent 轮询 Scheduler | 解耦 | 延迟高 |
+| **C：Push 主 + Pull 辅（当前）** | Push 分配 + 30s SyncTasks 安全网 | 实时性 + 一致性保障 | 需要两套机制 |
 
-**[建议]**：方案 C（Push 主 + Pull 辅）。事件驱动的 Push 模式保证任务分配的实时性，Agent 周期性 SyncTasks（默认 30s）作为安全网，确保因网络抖动等原因遗漏的 Push 消息能被补偿。SyncTasks 携带 Agent 当前任务列表，Scheduler 对比后返回 diff（需要新增/删除的任务）。
+**选择 C。** 事件驱动的 Push 保证实时性，周期性 SyncTasks 兜底一致性。
 
-### DEC-JS-04：Peer 通信传输协议
+### DEC-JS-04：健康检测归属
 
 | 方案 | 描述 | 优点 | 缺点 |
 |------|------|------|------|
-| A：HTTP | 基于 HTTP 的 Advertisement | 简单；可调试；与生态兼容 | overhead 较大 |
-| B：UDP | 原始 UDP 广播 | 低延迟；低 overhead | 不可靠；需自行实现确认 |
-| C：gRPC streaming | 长连接流式传输 | 高效；双向；类型安全 | 连接管理复杂 |
+| A：独立 K3 组件（v1.0） | 独立健康检测模块 | 职责分离 | 增加组件间通信；协调层参与健康决策 |
+| **B：合并入 Scheduler（当前）** | Scheduler 直接检测 Agent 和目标健康 | 减少组件；低延迟；与采集决策紧密耦合 | Scheduler 职责增加 |
 
-**[建议]**：阶段 1 用方案 A（HTTP），简单可靠。阶段 2 评估方案 C（gRPC streaming）以降低大规模场景下的开销。
+**选择 B。** 健康检测的结果直接决定采集行为（actual_scrape = enabled AND healthy），合并后决策链路最短，无需跨组件通信。
 
 ---
 
-## 七、冲突与开放问题
+## 七、开放问题
 
 | ID | 问题 | 影响 | 状态 |
 |----|------|------|------|
-| C11 | Job Scheduler → Agent 调度协议未最终定义（HTTP vs gRPC vs MQ） | 影响 Agent 接口设计和性能 | 待确认 |
-| C15 | Agent 故障时的重分配策略未明确（同节点优先 vs 跨节点均衡） | 影响故障恢复速度和负载均衡 | 待确认 |
-| JS-01 | 2 节点区 VRRP 检测的特殊处理：1 节点故障 = 无法达成多数派 | 2 节点区可用性受限 | 待确认（参见 DA-03） |
-| JS-02 | Manifest diff 算法的复杂度与正确性保证 | 大 Manifest 时 diff 计算可能成为瓶颈 | 待压测 |
-| JS-03 | Peer 检测的时间偏差处理：节点时钟不同步时的影响 | 可能导致误判 SUSPECT/EXPIRED | 待确认 |
-| JS-04 | 节点 FENCED 状态的自动恢复机制：是否需要人工干预 | 影响运维自动化程度 | 待确认 |
-| JS-05 | 大规模 slot（>5000）时 Peer Advertisement 报文大小 | 影响网络开销和解析性能 | 待压测 |
-| JS-06 | Agent 调度中的亲和性策略：是否优先保持 target-Agent 绑定 | 影响采集稳定性和上下文切换开销 | 待确认 |
+| JS-01 | Gossip 消息是否使用 mTLS？ | 安全性 vs 性能 | 待确认（建议默认 mTLS） |
+| JS-02 | Rendezvous Hashing 的哈希函数选择？ | 分布均匀性 | 待压测（建议 MurmurHash3） |
+| JS-03 | 大规模实例（10 万+）下 Rendezvous Hashing 计算耗时？ | 每次拓扑变更需遍历所有实例 | 待压测 |
+| JS-04 | 代理服务的负载均衡能力？ | 单代理可能成为瓶颈 | 待评估（大 zone 可能需要多代理） |
+| JS-05 | Agent 调度中的亲和性策略？ | 采集稳定性 vs 负载均衡 | 待确认 |
+| JS-06 | 网络分区恢复后的去重策略？ | 短暂重复采集的指标数据如何处理 | 待确认（建议标记 duplicate 标签） |
