@@ -156,8 +156,8 @@ Worker-Storage 绑定:
   │                                                    │
   │  ┌──────────────┐  ┌──────────┐  ┌─────────────┐ │
   │  │  vmstorage    │  │ vmalert  │  │Alertmanager │ │
-  │  │  (数据存储)    │  │ (规则    │  │ (去重/分组/ │ │
-  │  │              │  │  评估)   │  │  通知)      │ │
+  │  │  (数据存储)    │  │ (规则    │  │ (去重/恢复  │ │
+  │  │              │  │  评估)   │  │  检测)      │ │
   │  └──────┬───────┘  └────┬─────┘  └──────┬──────┘ │
   │         │               │               │         │
   │         └───────────────┼───────────────┘         │
@@ -179,10 +179,16 @@ Worker-Storage 绑定:
                             ↓
                          vmalert (评估告警规则, 查询 vmselect)
                             ↓
-                         Alertmanager (去重, 分组, 静默, 抑制)
+                         Alertmanager (仅存储域去重 + resolved 检测; 零用户配置)
+                            ↓ webhook (send_resolved=true)
+                         am-bridge (注入 dedup_key)
                             ↓
-                         消息队列 → 平台
+                         Kafka alert.raw → Flink 收敛引擎
+                            ↓
+                         Kafka alert.converged → 平台告警管理
 ```
+
+> **v1.1 修订（2026-09-24，DEC-028 ~ DEC-037）**：原图为 `Alertmanager (去重, 分组, 静默, 抑制) → 消息队列 → 平台`。AM 已收缩为**零用户配置**的存储域去重组件，分组/静默/抑制/路由全部迁出（屏蔽与抑制归 Flink，路由与通知归平台）；「消息队列」明确为单 Kafka 集群六 topic，中间新增 am-bridge 与 Flink 收敛引擎。完整链路见 `control-plane/alert-management.md` §1.1，本文档只关注存储侧共部署单元。
 
 vmalert 查询 vmselect 而非直接查询 vmstorage 的原因：
 - vmselect fan-out 到所有 vmstorage，提供全局指标视图

@@ -1,8 +1,12 @@
 # 多网区监控采集平台 — 功能模块设计索引
 
-> 版本：v1.0 | 日期：2026-09-21
+> 版本：v1.2 | 日期：2026-09-24
 > 上游文档：`项目架构雏形与冲突分析.md`（v3）
 > 状态：功能模块拆分设计，含冲突标注与多方案对比
+>
+> **v1.2 更新（2026-09-24）**：告警处理层（§2.5）补齐 DEC-034 ~ DEC-037 的组件变化——AM 零配置化、新增 `notification_scheduler`(A6) 与带外心跳监控(A7)、关闭清理改单向、Flink 算子链重排、引入 `dedup_key`。C4/C5 职责描述同步更新。
+>
+> **v1.1 更新（2026-09-24）**：新增 §2.5 告警处理层（A1~A5），对应 DEC-028 ~ DEC-033。
 
 ---
 
@@ -47,10 +51,10 @@
 | # | 模块 | 文档 | 核心职责 | 状态 |
 |---|------|------|---------|------|
 | C1 | 网区管理 | [control-plane/zone-management.md](control-plane/zone-management.md) | Zone 注册/发现、网段映射、拓扑维护、自动推荐 | 设计中 |
-| C2 | 实例管理 | [control-plane/instance-management.md](control-plane/instance-management.md) | 实例台账、分类管理（Oracle/MySQL/Linux/Windows）、快速测试 | 设计中 |
+| C2 | 实例管理 | [control-plane/instance-management.md](control-plane/instance-management.md) | 实例台账、分类管理（Oracle/MySQL/Linux/Windows）、快速测试、CMDB 拓扑同步与标签富化 | 设计中 |
 | C3 | 实例状态维护 | [control-plane/instance-status.md](control-plane/instance-status.md) | 周期性从 TSDB 拉取中间件状态、状态机维护、异常检测 | 设计中 |
-| C4 | 告警管理 | [control-plane/alert-management.md](control-plane/alert-management.md) | RC 事件汇聚、告警收敛、静默策略、告警认领、告警策略管理 | 设计中 |
-| C5 | 通知渠道管理 | [control-plane/notification-channel.md](control-plane/notification-channel.md) | 通知渠道配置、路由规则、升级策略 | 设计中 |
+| C4 | 告警管理 | [control-plane/alert-management.md](control-plane/alert-management.md) | 最终事件消费、告警认领（含三个正交开关）、路由匹配、通知调度（重复通知/自动升级/通知静默）、关闭与单向状态清理、全量事件账本与处理轨迹检索、动态收敛/抑制/屏蔽规则管理、降噪效果分析 | 设计中 |
+| C5 | 通知渠道管理 | [control-plane/notification-channel.md](control-plane/notification-channel.md) | 通知渠道配置、通知组管理（receiver 目标）、模板渲染（firing/resolved 分模板）、限流与投递幂等、渠道健康与主备切换、**升级链定义（唯一权威）**、硬编码最小通知路径 | 设计中 |
 | C6 | 指标维护 | [control-plane/metric-management.md](control-plane/metric-management.md) | 常用查询集、用户自定义查询、指标元数据管理 | 设计中 |
 | C7 | 凭据服务 | [control-plane/credential-service.md](control-plane/credential-service.md) | 凭据存储/分发、访问控制、轮换策略 | 设计中 |
 | C8 | 统一查询入口 | [control-plane/query-gateway.md](control-plane/query-gateway.md) | 查询网关、路由决策、Grafana 集成、跨区混合查询 | 设计中 |
@@ -107,6 +111,41 @@
 | [cross-plane/degradation-autonomy.md](cross-plane/degradation-autonomy.md) | 四级降级阶梯（L0-L3）详细定义 |
 | [cross-plane/decisions-log.md](cross-plane/decisions-log.md) | 所有设计决策、冲突记录、多方案对比 |
 
+### 2.5 告警处理层 (Alert Processing)
+
+> **v1.1 新增（2026-09-24，DEC-028 ~ DEC-033）**：告警链路重构后新增的平台侧组件。这些组件不属于「定义权威」的控制面，也不属于区内执行的采集层，因此单列。详细设计见 [control-plane/alert-management.md](control-plane/alert-management.md)。
+>
+> **v1.2 更新（2026-09-24，DEC-034 ~ DEC-037）**：AM 收缩为**零用户配置**组件（config 由部署模板生成，不走 UI）；新增 A6 `notification_scheduler`（平台侧通知调度）与 A7 带外心跳监控；关闭清理由双向改为**单向**（不再回调 AM silence）；Flink 算子链重排。
+
+| # | 组件 | 部署位置 | 核心职责 | 状态 |
+|---|------|----------|----------|------|
+| A1 | Alertmanager | 存储侧（与 vmalert 共部署） | **存储域内去重 + resolved 检测**，仅此两项。**零用户配置**——config 由部署模板生成，变更走发布流程。不做分组/屏蔽/抑制/路由/silence。AM 之间**不组集群**，状态由 `resolve_timeout`(30m) 自清理 | 设计中 |
+| A2 | am-bridge | 存储侧或平台侧 | 无状态 webhook → Kafka 桥接（AM 原生无 Kafka sink）；注入来源标识与 **`dedup_key`**（跨域去重键，剔除 `zone` 等来源标识标签后重新哈希） | 设计中 |
+| A3 | Kafka | 平台侧 | 单集群六 topic：`alert.raw`（key=`dedup_key`）/ `alert.rule` / `alert.topo` / `alert.control` / `alert.event` / `alert.converged`。缓冲削峰，隔离故障域 | 设计中 |
+| A4 | **Flink 收敛引擎** | 平台侧 | **全局唯一裁决点**：屏蔽（纯 broadcast）→ 跨域去重（`dedup_key` first-wins + 续约吸收）→ 收敛（组级恢复裁决）→ 逐级抑制（拓扑 RCA + 抑制解除信号）→ 恢复延迟与抖动锁定；全量事件账本 + 处理轨迹；动态规则 broadcast 热更新。**不参与任何通知决策** | 设计中 |
+| A5 | 账本落库 worker | 平台侧 | 独立 consumer group 消费 `alert.event`，批量落库（前期 PG 分区，阈值触发后迁 ClickHouse）。lag 影响明细下钻**与抑制解除补发的正确性** | 设计中 |
+| A6 | **notification_scheduler** | 平台侧（C4 内） | 重复通知、自动升级、认领超时、恢复处理、抑制解除补发。PG 扫描 + `FOR UPDATE SKIP LOCKED`，无状态可多副本。**通知策略变更永不触碰 Flink** | 设计中 |
+| A7 | **带外心跳监控** | 独立于告警链路 | 监控**整条存储侧链路 + Flink**（Alloy/vmstorage/vmselect/vmalert/AM/bridge/Kafka/Flink）存活；超时走**硬编码最小通知路径**（不经路由策略、不经 Flink/Kafka，直连短信电话）。vmalert 挂掉 = 全量伪恢复，比 Flink 挂掉危险一个量级 | 设计中 |
+
+**告警链路**：
+
+```
+vmalert → AM(A1 去重+resolved) → am-bridge(A2 +dedup_key) → Kafka(A3) → Flink(A4)
+                                                                          ├→ alert.event → 账本 worker(A5) → 账本存储
+                                                                          └→ alert.converged → C4 告警管理
+                                                                                                 ↓
+                                                              A6 通知调度 → C5 通知渠道 → 运维人员
+                                                              关闭 → alert.control → 单向清理 Flink 状态
+
+A7 带外心跳 ⟂ 独立监控以上全链路，故障时走硬编码最小通知路径
+```
+
+**关键边界（三条）**：
+
+1. **告警管理（C4）只在最终事件到达平台后才开始。** 去重、收敛、抑制、屏蔽全部在 A1/A4 完成，C4 不承担这些职责，也不感知原始告警量级。
+2. **Flink（A4）不参与任何通知决策。** 路由匹配、重复通知、自动升级、通知静默全在平台侧（A6 + C5），因为这些决策依赖认领状态等平台可变业务状态，而 `claim` 不进流。
+3. **两类静默分属不同层。** 告警屏蔽（Flink，决定事件是否成立，被屏蔽事件不进活跃列表）vs 通知静默（平台，事件照常产生入库，只是不叫人）。详见 alert-management.md §3.5。
+
 ---
 
 ## 三、模块依赖关系
@@ -162,12 +201,15 @@
 | ID | 冲突 | 涉及模块 | 严重程度 | 当前状态 |
 |----|------|---------|---------|---------|
 | MC-01 | 任务定义归属：控制面 vs 协调面 | C1/K1 | P0 | 本设计采用「定义在控制面，调度在协调面」拆分方案 |
-| MC-02 | RC 任务是否需要独立 slot 池 | K1/K2 | P1 | 待确认，见 decisions-log.md DEC-002 |
+| ~~MC-02~~ | ~~RC 任务是否需要独立 slot 池~~ | ~~K1/K2~~ | — | **已作废**：Slot 模型整体废弃（DEC-010/DEC-014），Alloy clustering 替代；RC/vmalert 移至存储侧共部署（DEC-026） |
 | MC-03 | 实例状态维护的数据源选择 | C3/D6 | P1 | TSDB 直查 vs 中间件缓存，见 instance-status.md |
-| MC-04 | 模式 A 网区的告警覆盖缺失 | C4/D4 | P0 | 模式 A 无 RC，告警能力受限，见 alert-management.md |
+| ~~MC-04~~ | ~~模式 A 网区的告警覆盖缺失~~ | ~~C4/D4~~ | — | **已作废**：Mode A/B/C 概念整体废弃（DEC-003/DEC-009/DEC-022）。vmalert 存储侧共部署并查询 vmselect 获得全局可见性（DEC-026），「无本地 RC」问题不复存在。见 alert-management.md MC-04 |
 | MC-05 | Grafana 数据源自动维护的复杂度 | C8/D5 | P1 | 三阶段方案，见 query-gateway.md |
 | MC-06 | 跨区混合查询的性能与一致性 | C8/K1 | P1 | fan-out 聚合 vs 中心汇聚，见 query-gateway.md |
 | MC-07 | 凭据扩散与 Manifest 全区广播的矛盾 | C7/K1 | P0 | Manifest 不含凭据，只含 credential_id 引用 |
+| MC-16 | 跨时区通知静默期 | C5 | P2 | 值班排班不做后失去 timezone 载体；建议全局统一时区，见 notification-channel.md NC-MC-14 |
+| RC-09 | vmalert / 存储侧故障 = 全量伪恢复 | A1/A7/D4 | P0 | **已接受 + 补偿**：带外心跳覆盖整条存储侧链路 + `resolve_timeout` 30m + 规则强制配套看门狗。见 rc-rulecheck.md §3.5.4 |
+| RC-10 | `dedup_key` 来源标识标签排除列表的维护 | A2/A4 | P1 | 新增来源类标签未同步列表会导致跨域去重静默失效，见 rc-rulecheck.md |
 
 ### 4.2 全局待决策
 
